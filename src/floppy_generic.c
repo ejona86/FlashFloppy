@@ -79,7 +79,9 @@ static struct image *image;
 
 static struct {
     struct timer timer, timer_deassert;
+    struct timer sector_timer, sector_timer_deassert;
     time_t prev_time;
+    time_t offset; /* adjustment of index pulse relative to start of track */
     bool_t fake_fired;
 } index;
 
@@ -632,9 +634,23 @@ static void IRQ_rdata_dma(void)
         ticks += dma_rd->buf[i] + 1;
     /* Subtract current flux offset beyond the index. */
     ticks -= image_ticks_since_index(drv->image);
+    if (!drv->image->nr_hardsecs || !drv->image->tracklen_ticks) {
+        index.offset = 0;
+    } else {
+        uint32_t tracklen_ticks = drv->image->tracklen_ticks>>4;
+        uint32_t sectorlen_ticks = tracklen_ticks / drv->image->nr_hardsecs;
+        uint32_t sector_ticks = ticks % sectorlen_ticks;
+        sector_ticks /= SYSCLK_MHZ/TIME_MHZ;
+        /** Sector pulses are at the beginning of every sector .*/
+        timer_set(&index.sector_timer, now + sector_ticks);
+
+        /** Index pulse is in the middle of the last sector. */
+        index.offset = tracklen_ticks - (sectorlen_ticks / 2);
+        index.offset /= SYSCLK_MHZ/TIME_MHZ;
+    }
     /* Calculate deadline for index timer. */
     ticks /= SYSCLK_MHZ/TIME_MHZ;
-    timer_set(&index.timer, now + ticks);
+    timer_set(&index.timer, now + ticks + index.offset);
 }
 
 static void IRQ_wdata_dma(void)

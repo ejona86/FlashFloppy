@@ -26,6 +26,8 @@ void IRQ_43(void) __attribute__((alias("IRQ_soft")));
 /* Index-pulse timer functions. */
 static void index_assert(void *);   /* index.timer */
 static void index_deassert(void *); /* index.timer_deassert */
+static void sector_assert(void *);   /* index.sector_timer */
+static void sector_deassert(void *); /* index.sector_timer_deassert */
 
 static time_t sync_time, sync_pos;
 
@@ -180,6 +182,7 @@ void floppy_cancel(void)
     /* Clear soft state. */
     timer_cancel(&drv->chgrst_timer);
     timer_cancel(&index.timer);
+    timer_cancel(&index.sector_timer);
     barrier(); /* cancel index.timer /then/ clear dma rings */
     dma_rd = dma_wr = NULL;
     barrier(); /* /then/ clear soft state */
@@ -189,6 +192,7 @@ void floppy_cancel(void)
     index.fake_fired = FALSE;
     barrier(); /* /then/ cancel index.timer_deassert */
     timer_cancel(&index.timer_deassert);
+    timer_cancel(&index.sector_timer_deassert);
     motor_chgrst_eject(drv);
 
     /* Set outputs for empty drive. */
@@ -294,6 +298,8 @@ void floppy_init(void)
 
     timer_init(&index.timer, index_assert, NULL);
     timer_init(&index.timer_deassert, index_deassert, NULL);
+    timer_init(&index.sector_timer, sector_assert, NULL);
+    timer_init(&index.sector_timer_deassert, sector_deassert, NULL);
 
     motor_chgrst_eject(drv);
 }
@@ -411,9 +417,16 @@ static void floppy_sync_flux(void)
             /* Subtract current flux offset beyond the index. */
             ticks -= image_ticks_since_index(drv->image);
 
+            if (drv->image->nr_hardsecs && drv->image->tracklen_ticks) {
+                uint32_t tracklen_ticks = drv->image->tracklen_ticks>>4;
+                uint32_t sectorlen_ticks = tracklen_ticks / drv->image->nr_hardsecs;
+                uint32_t sector_ticks = ticks % sectorlen_ticks;
+                sector_ticks /= SYSCLK_MHZ/TIME_MHZ;
+                timer_set(&index.sector_timer, time_now() + sector_ticks);
+            }
             /* Calculate deadline for index timer. */
             ticks /= SYSCLK_MHZ/TIME_MHZ;
-            timer_set(&index.timer, time_now() + ticks);
+            timer_set(&index.timer, time_now() + ticks + index.offset);
         }
 
         IRQ_global_disable();
@@ -469,6 +482,8 @@ static bool_t dma_rd_handle(struct drive *drv)
             sync_time = index_time + read_start_pos;
             if (time_diff(time_now(), sync_time) < 0)
                 sync_time += drv->image->stk_per_rev;
+            //if (time_diff(time_now(), sync_time) < 0)
+            //    sync_time += drv->image->stk_per_rev;
         }
         /* Change state /then/ check for race against step or side change. */
         dma_rd->state = DMA_starting;
@@ -495,7 +510,14 @@ static bool_t dma_rd_handle(struct drive *drv)
             ARRAY_SIZE(dma_rd->buf) - dma_rdata.cndtr;
         /* Free-running index timer. */
         timer_cancel(&index.timer);
-        timer_set(&index.timer, index.prev_time + drv->image->stk_per_rev);
+        timer_set(&index.timer,
+                  index.prev_time + index.offset + drv->image->stk_per_rev);
+        if (drv->image->nr_hardsecs) {
+            time_t sector_stk = drv->image->stk_per_rev / drv->image->nr_hardsecs;
+            time_t now = time_now();
+            time_t offset = time_diff(index.prev_time, now) % sector_stk;
+            timer_set(&index.sector_timer, now + offset);
+        }
         break;
     }
 
@@ -542,16 +564,36 @@ static bool_t index_is_suppressed(struct drive *drv)
 static void index_assert(void *dat)
 {
     struct drive *drv = &drive;
-    index.prev_time = index.timer.deadline;
+    index.prev_time = index.timer.deadline - index.offset;
     if (drv->motor.on && !index_is_suppressed(drv)) {
         drive_change_output(drv, outp_index, TRUE);
-        timer_set(&index.timer_deassert, index.prev_time + time_ms(2));
+        timer_set(&index.timer_deassert, index.timer.deadline + time_ms(2));
     }
     if (dma_rd->state != DMA_active) /* timer set from input flux stream */
-        timer_set(&index.timer, index.prev_time + drv->image->stk_per_rev);
+        timer_set(&index.timer, index.timer.deadline + drv->image->stk_per_rev);
 }
 
 static void index_deassert(void *dat)
+{
+    struct drive *drv = &drive;
+    drive_change_output(drv, outp_index, FALSE);
+}
+
+static void sector_assert(void *dat)
+{
+    struct drive *drv = &drive;
+    time_t deadline = index.sector_timer.deadline;
+    time_t sector_stk = drv->image->stk_per_rev / drv->image->nr_hardsecs;
+    if (drv->motor.on && !index_is_suppressed(drv)) {
+        drive_change_output(drv, outp_index, TRUE);
+        timer_set(&index.sector_timer_deassert, deadline + time_ms(2));
+    }
+    //if (dma_rd->state != DMA_active) { /* timer set from input flux stream */
+        timer_set(&index.sector_timer, deadline + sector_stk);
+    //}
+}
+
+static void sector_deassert(void *dat)
 {
     struct drive *drv = &drive;
     drive_change_output(drv, outp_index, FALSE);
