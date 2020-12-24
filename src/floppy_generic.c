@@ -77,9 +77,15 @@ static struct drive {
 
 static struct image *image;
 
+#define MAX_AUX_PULSES 16
+
 static struct {
     struct timer timer, timer_deassert;
     time_t prev_time;
+    struct timer aux_timer, aux_timer_deassert;
+    /* Durations relative to track start. Must be in increasing order. */
+    time_t aux_pulses[MAX_AUX_PULSES];
+    uint8_t aux_pulses_len;
     bool_t fake_fired;
 } index;
 
@@ -632,6 +638,26 @@ static void IRQ_rdata_dma(void)
         ticks += dma_rd->buf[i] + 1;
     /* Subtract current flux offset beyond the index. */
     ticks -= image_ticks_since_index(drv->image);
+    if (!drv->image->nr_hardsecs || drv->image->nr_hardsecs > MAX_AUX_PULSES) {
+        index.aux_pulses_len = 0;
+    } else {
+        uint32_t tracklen_ticks =
+            (drv->image->tracklen_ticks>>4) / (SYSCLK_MHZ/TIME_MHZ);
+        uint32_t sectorlen_ticks = tracklen_ticks / drv->image->nr_hardsecs;
+        uint32_t oldpri;
+
+        oldpri = IRQ_save(TIMER_IRQ_PRI);
+
+        index.aux_pulses[0] = sectorlen_ticks;
+        for (int i = 1; i < drv->image->nr_hardsecs - 1; i++)
+            index.aux_pulses[i] = index.aux_pulses[i-1] + sectorlen_ticks;
+        /** Index pulse is in the middle of the last sector. */
+        index.aux_pulses[drv->image->nr_hardsecs-1] =
+            tracklen_ticks - sectorlen_ticks/2;
+        index.aux_pulses_len = drv->image->nr_hardsecs;
+
+        IRQ_restore(oldpri);
+    }
     /* Calculate deadline for index timer. */
     ticks /= SYSCLK_MHZ/TIME_MHZ;
     timer_set(&index.timer, now + ticks);
