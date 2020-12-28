@@ -141,6 +141,7 @@ static void hfe_setup_track(
     uint32_t sys_ticks;
     uint8_t cyl = track >> (im->hfe.double_step ? 2 : 1);
     uint8_t side = track & (im->nr_sides - 1);
+    int i;
 
     track = cyl*2 + side;
     if (track != im->cur_track)
@@ -157,6 +158,14 @@ static void hfe_setup_track(
 
     rd->prod = rd->cons = 0;
     bc->prod = bc->cons = 0;
+
+    for (i = 0; i < im->aux_pulses_len; i++)
+        /* Fuzz factor of 1 ms. Arbitrary, although less than half the smallest
+         * conceivable index hole gap (360 RPM, 32 sector = 5.2 ms and 2.6 ms
+         * gaps). */
+        if (im->cur_ticks - sysclk_ms(1) < im->aux_pulses[i])
+            break;
+    im->hfe.next_aux_pulses_pos = i;
 
     /* Aggressively batch our reads at HD data rate, as that can be faster 
      * than some USB drives will serve up a single block.*/
@@ -243,6 +252,8 @@ static uint16_t hfe_rdata_flux(struct image *im, uint16_t *tbuf, uint16_t nr)
             im->cur_bc = im->cur_ticks = 0;
             /* Skip tail of current 256-byte block. */
             bc_c = (bc_c + 256*8-1) & ~(256*8-1);
+            im->aux_pulses_len = im->hfe.next_aux_pulses_pos;
+            im->hfe.next_aux_pulses_pos = 0;
             continue;
         }
         y = bc_c % 8;
@@ -250,8 +261,11 @@ static uint16_t hfe_rdata_flux(struct image *im, uint16_t *tbuf, uint16_t nr)
         if (is_v3 && (y == 0) && ((x & 0xf) == 0xf)) {
             /* V3 byte-aligned opcode processing. */
             switch (x >> 4) {
-            case OP_nop:
             case OP_index:
+                if (im->hfe.next_aux_pulses_pos < MAX_AUX_PULSES)
+                    im->aux_pulses[im->hfe.next_aux_pulses_pos++] = im->cur_ticks;
+                /* fallthrough */
+            case OP_nop:
             default:
                 bc_c += 8;
                 im->cur_bc += 8;
@@ -273,8 +287,6 @@ static uint16_t hfe_rdata_flux(struct image *im, uint16_t *tbuf, uint16_t nr)
                 x = bc_b[(bc_c/8) & bc_mask] >> y;
                 break;
             case OP_rand:
-                bc_c += 8;
-                im->cur_bc += 8;
                 x = rand();
                 break;
             }
@@ -315,6 +327,7 @@ static bool_t hfe_write_track(struct image *im)
     uint32_t i, space, c = wr->cons / 8, p = wr->prod / 8;
     bool_t writeback = FALSE;
     time_t t;
+    bool_t is_v3 = im->hfe.is_v3;
 
     /* If we are processing final data then use the end index, rounded to
      * nearest. */
@@ -364,14 +377,39 @@ static bool_t hfe_write_track(struct image *im)
             + (im->cur_track & 1) * 256
             + batch_off - im->hfe.write_batch.off
             + (off & 255);
-        for (i = 0; i < nr; i++)
+        for (i = 0; i < nr; i++) {
+            if (is_v3 && (*w & 0xf) == 0xf) {
+                switch (*w >> 4) {
+                case OP_skip:
+                    /* Don't bother; leave the few bits added here as-is. It is
+                     * non-trial to write on a bit level and unlikely to
+                     * matter. */
+                    w++;
+                    i++;
+                    /* fallthrough */
+                case OP_bitrate:
+                    w++;
+                    i++;
+                    /* fallthrough */
+                default:
+                case OP_nop:
+                case OP_index:
+                    w++; /* Preserve opcode. */
+                    continue;
+
+                case OP_rand:
+                    /* Replace with data. */
+                    break;
+                }
+            }
             *w++ = _rbit32(buf[c++ & bufmask]) >> 24;
+        }
         im->hfe.write_batch.dirty = TRUE;
 
-        im->hfe.trk_pos += nr;
+        im->hfe.trk_pos += i; /* i may be larger than nr due to ops. */
         if (im->hfe.trk_pos >= im->hfe.trk_len) {
-            ASSERT(im->hfe.trk_pos == im->hfe.trk_len);
-            im->hfe.trk_pos = 0;
+            ASSERT(im->hfe.trk_pos - im->hfe.trk_len <= 2);
+            im->hfe.trk_pos -= im->hfe.trk_len;
             im->hfe.write.wrapped = TRUE;
         }
     }

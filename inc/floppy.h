@@ -48,6 +48,7 @@ struct hfe_image {
     uint16_t trk_off;
     uint16_t trk_pos, trk_len;
     bool_t is_v3, double_step;
+    uint8_t next_aux_pulses_pos;
     uint8_t batch_secs;
     struct {
         uint16_t start;
@@ -157,6 +158,8 @@ struct image_bufs {
     struct image_buf read_data;
 };
 
+#define MAX_AUX_PULSES 32
+
 struct image {
     /* Handler for currently-selected type of disk image. */
     const struct image_handler *disk_handler;
@@ -169,7 +172,8 @@ struct image {
 
     /* Info about image as a whole. */
     uint8_t nr_cyls, nr_sides;
-    uint8_t nr_hardsecs; /* 0 for soft sectors */
+    uint32_t aux_pulses[MAX_AUX_PULSES]; /* Additional index pulse locations, in ticks. */
+    uint8_t aux_pulses_len;
 
     /* Data buffers. */
     struct image_bufs bufs;

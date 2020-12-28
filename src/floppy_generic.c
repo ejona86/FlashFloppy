@@ -77,8 +77,6 @@ static struct drive {
 
 static struct image *image;
 
-#define MAX_AUX_PULSES 16
-
 static struct {
     struct timer timer, timer_deassert;
     time_t prev_time;
@@ -372,12 +370,13 @@ static void wdata_stop(void)
 #if !defined(QUICKDISK)
     if (!ff_cfg.index_suppression) {
         /* Opportunistically insert an INDEX pulse ahead of writeback. */
-        drive_change_output(drv, outp_index, TRUE);
-        index.fake_fired = TRUE;
-        IRQx_set_pending(FLOPPY_SOFTIRQ);
+        // FIXME: But why? Delete fake_fired completely?
+        //drive_change_output(drv, outp_index, TRUE);
+        //index.fake_fired = TRUE;
+        //IRQx_set_pending(FLOPPY_SOFTIRQ);
         /* Position read head so it quickly triggers an INDEX pulse. */
-        drv->restart_pos = drv->image->stk_per_rev - stk_ms(20);
-        drv->index_suppressed = TRUE;
+        //drv->restart_pos = drv->image->stk_per_rev - stk_ms(20);
+        //drv->index_suppressed = TRUE;
     }
 #endif
 }
@@ -638,23 +637,14 @@ static void IRQ_rdata_dma(void)
         ticks += dma_rd->buf[i] + 1;
     /* Subtract current flux offset beyond the index. */
     ticks -= image_ticks_since_index(drv->image);
-    if (!drv->image->nr_hardsecs || drv->image->nr_hardsecs > MAX_AUX_PULSES) {
+    if (!drv->image->aux_pulses_len) {
         index.aux_pulses_len = 0;
     } else {
-        uint32_t tracklen_ticks =
-            (drv->image->tracklen_ticks>>4) / (SYSCLK_MHZ/TIME_MHZ);
-        uint32_t sectorlen_ticks = tracklen_ticks / drv->image->nr_hardsecs;
-        uint32_t oldpri;
+        uint32_t oldpri = IRQ_save(TIMER_IRQ_PRI);
 
-        oldpri = IRQ_save(TIMER_IRQ_PRI);
-
-        index.aux_pulses[0] = sectorlen_ticks;
-        for (int i = 1; i < drv->image->nr_hardsecs - 1; i++)
-            index.aux_pulses[i] = index.aux_pulses[i-1] + sectorlen_ticks;
-        /** Index pulse is in the middle of the last sector. */
-        index.aux_pulses[drv->image->nr_hardsecs-1] =
-            tracklen_ticks - sectorlen_ticks/2;
-        index.aux_pulses_len = drv->image->nr_hardsecs;
+        for (int i = 0; i < drv->image->aux_pulses_len; i++)
+            index.aux_pulses[i] = ((drv->image->aux_pulses[i])>>4) / (SYSCLK_MHZ/TIME_MHZ);
+        index.aux_pulses_len = drv->image->aux_pulses_len;
 
         IRQ_restore(oldpri);
     }

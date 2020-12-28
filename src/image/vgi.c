@@ -16,8 +16,14 @@
 
 #define MAX_WR_BATCH SECTORS
 
+#if MAX_AUX_PULSES < SECTORS
+#error "MAX_AUX_PULSES smaller than number of sectors"
+#endif
+
 static bool_t vgi_open(struct image *im)
 {
+    uint32_t sectorlen_ticks;
+    int i;
     FSIZE_t fsize = f_size(&im->fp);
     if (fsize == SECTORS*SECTOR_SIZE*45) {
         im->nr_cyls = 45; /* MOD I. 48 TPI */
@@ -37,7 +43,14 @@ static bool_t vgi_open(struct image *im)
 
     im->tracklen_bc = DD_TRACKLEN_BC;
     im->ticks_per_cell = (sysclk_stk(im->stk_per_rev) * 16u) / im->tracklen_bc;
-    im->nr_hardsecs = 16;
+
+    sectorlen_ticks = im->tracklen_bc / SECTORS * im->ticks_per_cell;
+    im->aux_pulses[0] = sectorlen_ticks;
+    for (i = 1; i < SECTORS - 1; i++)
+        im->aux_pulses[i] = im->aux_pulses[i-1] + sectorlen_ticks;
+    /** Index pulse is in the middle of the last sector. */
+    im->aux_pulses[i++] = im->tracklen_bc*im->ticks_per_cell - sectorlen_ticks/2;
+    im->aux_pulses_len = i;
 
     volume_cache_init(im->bufs.write_data.p + MAX_WR_BATCH * SECTOR_SIZE,
                       im->bufs.write_data.p + im->bufs.write_data.len);
