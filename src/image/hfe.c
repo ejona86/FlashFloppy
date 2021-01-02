@@ -156,6 +156,7 @@ static void hfe_setup_track(
     uint32_t start_ticks;
     uint8_t cyl = track >> (im->hfe.double_step ? 2 : 1);
     uint8_t side = track & (im->nr_sides - 1);
+    int i;
 
     track = cyl*2 + side;
     if (track/2 != im->cur_track/2) {
@@ -188,6 +189,11 @@ static void hfe_setup_track(
     im->ticks_since_flux = 0;
 
     bc->prod = bc->cons = 0;
+
+    for (i = 0; i < im->index_pulses_len; i++)
+        if (im->cur_ticks < im->index_pulses[i])
+            break;
+    im->hfe.next_index_pulses_pos = i;
 
     if (start_pos) {
         /* Read mode. */
@@ -269,6 +275,11 @@ static uint16_t hfe_rdata_flux(struct image *im, uint16_t *tbuf, uint16_t nr)
             im->cur_bc = im->cur_ticks = 0;
             /* Skip tail of current 256-byte block. */
             bc_c = (bc_c + 256*8-1) & ~(256*8-1);
+            if (im->index_pulses_len != im->hfe.next_index_pulses_pos) {
+                im->index_pulses_len = im->hfe.next_index_pulses_pos;
+                im->index_pulses_ver++;
+            }
+            im->hfe.next_index_pulses_pos = 0;
             continue;
         }
 
@@ -280,8 +291,19 @@ static uint16_t hfe_rdata_flux(struct image *im, uint16_t *tbuf, uint16_t nr)
         if (is_v3 && ((x & 0xf) == 0xf)) {
             /* V3 byte-aligned opcode processing. */
             switch (x) {
-            case OP_Nop:
             case OP_Index:
+                if (im->hfe.next_index_pulses_pos < MAX_CUSTOM_PULSES
+                    && im->index_pulses[im->hfe.next_index_pulses_pos] != im->cur_ticks) {
+
+                    im->index_pulses[im->hfe.next_index_pulses_pos]
+                        = im->cur_ticks;
+                    if (im->index_pulses_len < im->hfe.next_index_pulses_pos+1)
+                        im->index_pulses_len = im->hfe.next_index_pulses_pos+1;
+                    im->index_pulses_ver++;
+                }
+                im->hfe.next_index_pulses_pos++;
+                /* fallthrough */
+            case OP_Nop:
             default:
                 continue;
             case OP_Bitrate:
