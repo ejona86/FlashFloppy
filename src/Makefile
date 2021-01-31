@@ -10,6 +10,7 @@ OBJS += fs.o
 OBJS += sd_spi.o
 OBJS += spi.o
 OBJS += string.o
+OBJS += thread.o
 OBJS += cortex.o mcu_$(mcu).o
 OBJS += time.o
 OBJS += timer.o
