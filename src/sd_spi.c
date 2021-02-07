@@ -66,6 +66,8 @@ static uint8_t wait_ready(void)
     /* Wait 500ms for card to be ready. */
     do {
         res = spi_recv8(spi);
+        if (res != 0xff)
+            thread_yield();
     } while ((res != 0xff) && (time_since(start) < time_ms(500)));
 
     return res;
@@ -172,6 +174,8 @@ static bool_t datablock_recv(BYTE *buff, uint16_t bytes)
     /* Wait 100ms for data to be ready. */
     do {
         token = spi_recv8(spi);
+        if (token == 0xff)
+            thread_yield();
     } while ((token == 0xff) && (time_since(start) < time_ms(100)));
     if (token != 0xfe) /* valid data token? */
         return FALSE;

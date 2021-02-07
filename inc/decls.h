@@ -40,6 +40,7 @@
 #include "timer.h"
 #include "thread.h"
 #include "fs.h"
+#include "fs_async.h"
 #include "floppy.h"
 #include "volume.h"
 #include "config.h"

@@ -15,6 +15,7 @@ extern struct volume_ops usb_ops;
 static struct volume_ops *vol_ops = &usb_ops;
 
 static struct cache *cache;
+static bool_t inprogress;
 static void *metadata_addr;
 #define SECSZ 512
 
@@ -40,6 +41,7 @@ void volume_cache_metadata_only(FIL *fp)
 
 DSTATUS disk_initialize(BYTE pdrv)
 {
+    inprogress = FALSE;
     /* Default to USB if inserted. */
     vol_ops = &usb_ops;
     if (!(usb_ops.initialize(pdrv) & STA_NOINIT))
@@ -57,6 +59,19 @@ out:
     return disk_status(pdrv);
 }
 
+static inline void start_op(void)
+{
+    ASSERT(!inprogress);
+    inprogress = TRUE;
+}
+
+static inline DRESULT end_op(DRESULT res)
+{
+    ASSERT(inprogress);
+    inprogress = FALSE;
+    return res;
+}
+
 DSTATUS disk_status(BYTE pdrv)
 {
     return vol_ops->status(pdrv);
@@ -69,8 +84,10 @@ DRESULT disk_read(BYTE pdrv, BYTE *buff, LBA_t sector, UINT count)
     struct cache *c;
 
     if (((c = cache) == NULL)
-        || (metadata_addr && (buff != metadata_addr)))
-        return vol_ops->read(pdrv, buff, sector, count);
+        || (metadata_addr && (buff != metadata_addr))) {
+        start_op();
+        return end_op(vol_ops->read(pdrv, buff, sector, count));
+    }
 
     while (count) {
         if ((p = cache_lookup(c, sector)) == NULL)
@@ -83,7 +100,8 @@ DRESULT disk_read(BYTE pdrv, BYTE *buff, LBA_t sector, UINT count)
     return RES_OK;
 
 read_tail:
-    res = vol_ops->read(pdrv, buff, sector, count);
+    start_op();
+    res = end_op(vol_ops->read(pdrv, buff, sector, count));
     if (res == RES_OK)
         cache_update_N(c, sector, buff, count);
     return res;
@@ -91,8 +109,10 @@ read_tail:
 
 DRESULT disk_write(BYTE pdrv, const BYTE *buff, LBA_t sector, UINT count)
 {
-    DRESULT res = vol_ops->write(pdrv, buff, sector, count);
+    DRESULT res;
     struct cache *c;
+    start_op();
+    res = end_op(vol_ops->write(pdrv, buff, sector, count));
     if ((res == RES_OK) && ((c = cache) != NULL)
         && (!metadata_addr || (buff == metadata_addr)))
         cache_update_N(c, sector, buff, count);
@@ -101,7 +121,8 @@ DRESULT disk_write(BYTE pdrv, const BYTE *buff, LBA_t sector, UINT count)
 
 DRESULT disk_ioctl(BYTE pdrv, BYTE ctrl, void *buff)
 {
-    return vol_ops->ioctl(pdrv, ctrl, buff);
+    start_op();
+    return end_op(vol_ops->ioctl(pdrv, ctrl, buff));
 }
 
 bool_t volume_connected(void)
