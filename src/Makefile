@@ -5,6 +5,7 @@ OBJS += config.o
 OBJS += crc.o
 OBJS += flash_cfg.o
 OBJS += vectors.o
+OBJS += file_cache.o
 OBJS += fpec_$(mcu).o
 OBJS += fs.o
 OBJS += fs_async.o

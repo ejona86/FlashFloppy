@@ -39,6 +39,7 @@
 #include "spi.h"
 #include "timer.h"
 #include "thread.h"
+#include "file_cache.h"
 #include "fs.h"
 #include "fs_async.h"
 #include "floppy.h"
