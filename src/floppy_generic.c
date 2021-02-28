@@ -83,6 +83,7 @@ static struct {
     bool_t fake_fired;
 } index;
 
+static unsigned int drive_calc_track(struct drive *drv);
 static void rdata_stop(void);
 static void wdata_start(void);
 static void wdata_stop(void);
@@ -222,7 +223,24 @@ static void floppy_mount(struct slot *slot)
         ASSERT(im->bufs.read_data.len >= 10*1024);
 
         /* Mount the image file. */
-        image_open(im, slot, cltbl);
+#if defined(QUICKDISK)
+        image_open(im, slot, cltbl, FALSE);
+#else
+        {
+            uint8_t cyl = drive_calc_track(drv)>>1;
+            /* Skip useless loading if D-A guaranteed. */
+            if (cyl != 255)
+                image_open(im, slot, cltbl, FALSE);
+            /* Now that the number of image cylinders is known, do a precise D-A
+             * check. */
+            if (in_da_mode(im, cyl)) {
+                volume_cache_destroy(); /* Clean up after other image format. */
+                image_open(im, slot, cltbl, TRUE);
+                /* Remove write-protect when driven into D-A mode. */
+                drive_change_output(drv, outp_wrprot, FALSE);
+            }
+        }
+#endif
         if (!im->disk_handler->write_track || volume_readonly())
             slot->attributes |= AM_RDO;
         if (slot->attributes & AM_RDO) {
@@ -532,8 +550,7 @@ static bool_t dma_wr_handle(struct drive *drv)
         }
     
         /* Set up the track for writing. */
-        if (image_setup_track(im, write->track, NULL))
-            return TRUE;
+        image_setup_track(im, write->track, NULL);
 
         drv->writing = TRUE;
 
