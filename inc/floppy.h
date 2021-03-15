@@ -92,7 +92,11 @@ struct raw_trk {
 };
 
 struct img_image {
+    struct file_cache *fcache;
     uint32_t trk_off, base_off;
+    /* Length on-disk that encompases all track data. May contain other data
+     * (e.g., the other side of the cylinder). */
+    uint32_t trk_len;
     uint16_t trk_sec, rd_sec_pos;
     int32_t decode_pos;
     uint16_t decode_data_pos, crc;
@@ -108,6 +112,7 @@ struct img_image {
     /* Delay start of track this many bitcells past index. */
     uint32_t track_delay_bc;
     uint16_t gap_4;
+    uint16_t trash_bc; /* Number of bitcells to throw away. */
     uint32_t idx_sz, idam_sz;
     uint16_t dam_sz_pre, dam_sz_post;
     void *heap_bottom;

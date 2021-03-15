@@ -16,6 +16,7 @@ static void raw_setup_track(
     struct image *im, uint16_t track, uint32_t *start_pos);
 static bool_t raw_read_track(struct image *im);
 static bool_t raw_write_track(struct image *im);
+static void raw_sync(struct image *im);
 static bool_t raw_open(struct image *im);
 static void mfm_prep_track(struct image *im);
 static bool_t mfm_read_track(struct image *im);
@@ -66,7 +67,7 @@ static bool_t xdf_check(const struct bpb *bpb);
 #define LAYOUT_sides_swapped   (1u<<1)
 #define LAYOUT_reverse_side(x) (1u<<(2+(x)))
 
-#define CHUNK_SIZE 1024
+#define CHUNK_SIZE 256
 
 #define sec_sz(n) (128u << (n))
 
@@ -1531,6 +1532,7 @@ static void xdf_setup_track(
     }
 
     im->img.trk_off = (track>>1) * xdf_info->cyl_bytes;
+    im->img.trk_len = xdf_info->cyl_bytes;
     im->img.file_sec_offsets = xdf_info->file_sec_offsets[offs_sel];
 
     raw_setup_track(im, track, start_pos);
@@ -1542,6 +1544,8 @@ const struct image_handler img_image_handler = {
     .read_track = raw_read_track,
     .rdata_flux = bc_rdata_flux,
     .write_track = raw_write_track,
+    .sync = raw_sync,
+    .async = TRUE,
 };
 
 const struct image_handler d81_image_handler = {
@@ -1550,6 +1554,8 @@ const struct image_handler d81_image_handler = {
     .read_track = raw_read_track,
     .rdata_flux = bc_rdata_flux,
     .write_track = raw_write_track,
+    .sync = raw_sync,
+    .async = TRUE,
 };
 
 const struct image_handler sf7_image_handler = {
@@ -1566,6 +1572,8 @@ const struct image_handler st_image_handler = {
     .read_track = raw_read_track,
     .rdata_flux = bc_rdata_flux,
     .write_track = raw_write_track,
+    .sync = raw_sync,
+    .async = TRUE,
 };
 
 const struct image_handler adfs_image_handler = {
@@ -1574,6 +1582,8 @@ const struct image_handler adfs_image_handler = {
     .read_track = raw_read_track,
     .rdata_flux = bc_rdata_flux,
     .write_track = raw_write_track,
+    .sync = raw_sync,
+    .async = TRUE,
 };
 
 const struct image_handler atr_image_handler = {
@@ -1582,6 +1592,8 @@ const struct image_handler atr_image_handler = {
     .read_track = raw_read_track,
     .rdata_flux = bc_rdata_flux,
     .write_track = raw_write_track,
+    .sync = raw_sync,
+    .async = TRUE,
 };
 
 const struct image_handler mbd_image_handler = {
@@ -1590,6 +1602,8 @@ const struct image_handler mbd_image_handler = {
     .read_track = raw_read_track,
     .rdata_flux = bc_rdata_flux,
     .write_track = raw_write_track,
+    .sync = raw_sync,
+    .async = TRUE,
 };
 
 const struct image_handler mgt_image_handler = {
@@ -1598,6 +1612,8 @@ const struct image_handler mgt_image_handler = {
     .read_track = raw_read_track,
     .rdata_flux = bc_rdata_flux,
     .write_track = raw_write_track,
+    .sync = raw_sync,
+    .async = TRUE,
 };
 
 const struct image_handler pc98fdi_image_handler = {
@@ -1606,6 +1622,8 @@ const struct image_handler pc98fdi_image_handler = {
     .read_track = raw_read_track,
     .rdata_flux = bc_rdata_flux,
     .write_track = raw_write_track,
+    .sync = raw_sync,
+    .async = TRUE,
 };
 
 const struct image_handler pc98hdm_image_handler = {
@@ -1614,6 +1632,8 @@ const struct image_handler pc98hdm_image_handler = {
     .read_track = raw_read_track,
     .rdata_flux = bc_rdata_flux,
     .write_track = raw_write_track,
+    .sync = raw_sync,
+    .async = TRUE,
 };
 
 const struct image_handler trd_image_handler = {
@@ -1623,6 +1643,8 @@ const struct image_handler trd_image_handler = {
     .read_track = raw_read_track,
     .rdata_flux = bc_rdata_flux,
     .write_track = raw_write_track,
+    .sync = raw_sync,
+    .async = TRUE,
 };
 
 const struct image_handler opd_image_handler = {
@@ -1631,6 +1653,8 @@ const struct image_handler opd_image_handler = {
     .read_track = raw_read_track,
     .rdata_flux = bc_rdata_flux,
     .write_track = raw_write_track,
+    .sync = raw_sync,
+    .async = TRUE,
 };
 
 const struct image_handler ssd_image_handler = {
@@ -1640,6 +1664,8 @@ const struct image_handler ssd_image_handler = {
     .read_track = raw_read_track,
     .rdata_flux = bc_rdata_flux,
     .write_track = raw_write_track,
+    .sync = raw_sync,
+    .async = TRUE,
 };
 
 const struct image_handler dsd_image_handler = {
@@ -1649,6 +1675,8 @@ const struct image_handler dsd_image_handler = {
     .read_track = raw_read_track,
     .rdata_flux = bc_rdata_flux,
     .write_track = raw_write_track,
+    .sync = raw_sync,
+    .async = TRUE,
 };
 
 const struct image_handler sdu_image_handler = {
@@ -1657,6 +1685,8 @@ const struct image_handler sdu_image_handler = {
     .read_track = raw_read_track,
     .rdata_flux = bc_rdata_flux,
     .write_track = raw_write_track,
+    .sync = raw_sync,
+    .async = TRUE,
 };
 
 const struct image_handler jvc_image_handler = {
@@ -1665,6 +1695,8 @@ const struct image_handler jvc_image_handler = {
     .read_track = raw_read_track,
     .rdata_flux = bc_rdata_flux,
     .write_track = raw_write_track,
+    .sync = raw_sync,
+    .async = TRUE,
 };
 
 const struct image_handler vdk_image_handler = {
@@ -1673,6 +1705,8 @@ const struct image_handler vdk_image_handler = {
     .read_track = raw_read_track,
     .rdata_flux = bc_rdata_flux,
     .write_track = raw_write_track,
+    .sync = raw_sync,
+    .async = TRUE,
 };
 
 const struct image_handler ti99_image_handler = {
@@ -1681,6 +1715,8 @@ const struct image_handler ti99_image_handler = {
     .read_track = raw_read_track,
     .rdata_flux = bc_rdata_flux,
     .write_track = raw_write_track,
+    .sync = raw_sync,
+    .async = TRUE,
 };
 
 const struct image_handler xdf_image_handler = {
@@ -1689,6 +1725,8 @@ const struct image_handler xdf_image_handler = {
     .read_track = raw_read_track,
     .rdata_flux = bc_rdata_flux,
     .write_track = raw_write_track,
+    .sync = raw_sync,
+    .async = TRUE,
 };
 
 
@@ -1729,13 +1767,29 @@ static unsigned int file_idx(
         : (_c * im->nr_sides) + _s;
 }
 
+static inline unsigned int calc_track_len(
+    struct image *im, unsigned int cyl, unsigned int side)
+{
+    struct raw_trk *trk =
+        &im->img.trk_info[im->img.trk_map[cyl*im->nr_sides + side]];
+    struct raw_sec *sec = &im->img.sec_info_base[trk->sec_off];
+    unsigned int off = 0;
+    if (trk->img_bps != 0)
+        return trk->nr_sectors * trk->img_bps;
+    for (unsigned int k = 0; k < trk->nr_sectors; k++) {
+        off += sec_sz(sec->n);
+        sec++;
+    }
+    return off;
+}
+
 static void raw_seek_track(
     struct image *im, uint16_t track, unsigned int cyl, unsigned int side)
 {
-    unsigned int i, j, k, pos, idx, off;
+    unsigned int i, j, pos, idx, off;
     struct raw_trk *trk;
-    struct raw_sec *sec;
 
+    file_cache_sync_wait(im->img.fcache);
     im->cur_track = track;
 
     /* Update image structure with info for this track. */
@@ -1774,20 +1828,15 @@ static void raw_seek_track(
             for (j = 0; j < im->nr_sides; j++) {
                 if (file_idx(im, i, j) >= idx)
                     continue;
-                trk = &im->img.trk_info[im->img.trk_map[i*im->nr_sides + j]];
-                if (trk->img_bps != 0) {
-                    off += trk->nr_sectors * trk->img_bps;
-                } else {
-                    sec = &im->img.sec_info_base[trk->sec_off];
-                    for (k = 0; k < trk->nr_sectors; k++) {
-                        off += sec_sz(sec->n);
-                        sec++;
-                    }
-                }
+                off += calc_track_len(im, i, j);
             }
         }
         im->img.trk_off = off;
+        im->img.trk_len = calc_track_len(im, cyl, side);
     }
+
+    file_cache_readahead(
+            im->img.fcache, im->img.trk_off, im->img.trk_len, 6*1024);
 }
 
 static uint32_t calc_start_pos(struct image *im)
@@ -1882,8 +1931,7 @@ static void raw_setup_track(
     if (start_pos) {
         decode_off = calc_start_pos(im);
 
-        image_read_track(im);
-        bc->cons = decode_off * 16;
+        im->img.trash_bc = decode_off * 16;
         *start_pos = start_ticks;
     } else {
         im->img.decode_pos = 0;
@@ -1895,10 +1943,12 @@ static bool_t raw_open(struct image *im)
     if (im->step == 0)
         im->step = 1;
 
-    volume_cache_init(im->bufs.write_data.p + CHUNK_SIZE,
-                      im->img.heap_bottom);
+    im->img.fcache = file_cache_init(&im->fp, 2,
+            im->bufs.write_data.p + max_t(unsigned int, CHUNK_SIZE, 512),
+            im->img.heap_bottom);
 
     /* Initialise write_bc_ticks (used by floppy_insert to set outp_hden). */
+    im->cur_track = ~0;
     raw_seek_track(im, 0, 0, 0);
 
     return TRUE;
@@ -1964,7 +2014,6 @@ static bool_t raw_write_track(struct image *im)
     uint32_t c = wr->cons / 16, p = wr->prod / 16;
     struct raw_sec *sec;
     unsigned int i, off;
-    time_t t;
     uint16_t crc = im->img.crc;
     uint8_t idam_r;
 
@@ -2077,7 +2126,7 @@ static bool_t raw_write_track(struct image *im)
 
             if (im->img.decode_data_pos < sec_sz) {
                 unsigned int nr = sec_sz - im->img.decode_data_pos;
-                nr = min_t(unsigned int, nr, CHUNK_SIZE - (off & 511));
+                nr = min_t(unsigned int, nr, 512 - (off & 511));
                 if ((int16_t)(p - c) < nr)
                     break;
 
@@ -2085,21 +2134,21 @@ static bool_t raw_write_track(struct image *im)
                     crc = (im->sync == SYNC_fm) ? FM_DAM_CRC : MFM_DAM_CRC;
                     log("Write %u[%02x]/%u...",
                             sec_nr, sec->r, trk->nr_sectors);
-                    F_lseek(&im->fp, off);
+
+                    /* Sectors less than 512 bytes require read-then-write, so
+                     * benefit from readahead. Larger sectors don't need
+                     * readahead and can benefit from faster write throughput.
+                     */
+                    if (sec_sz >= 512)
+                        file_cache_readahead(im->img.fcache, 0, 0, 0);
                 }
 
-                t = time_now();
                 mfm_ring_to_bin(buf, bufmask, c, wrbuf, nr);
                 c += nr;
                 crc = crc16_ccitt(wrbuf, nr, crc);
                 process_data(im, wrbuf, nr);
-                F_write(&im->fp, wrbuf, nr, NULL);
-                printk(" %u us", time_diff(t, time_now()) / TIME_MHZ);
+                file_cache_write(im->img.fcache, wrbuf, off, nr);
                 im->img.decode_data_pos += nr;
-                if (im->img.decode_data_pos < sec_sz)
-                    printk("...");
-                else
-                    printk("\n");
             }
 
             if (im->img.decode_data_pos < sec_sz)
@@ -2121,9 +2170,19 @@ static bool_t raw_write_track(struct image *im)
         }
     }
 
+    if (flush)
+        file_cache_sync(im->img.fcache);
+    else
+        file_cache_progress(im->img.fcache);
     im->img.crc = crc;
     wr->cons = c * 16;
     return flush;
+}
+
+static void raw_sync(struct image *im)
+{
+    file_cache_sync_wait(im->img.fcache);
+    file_cache_shutdown(im->img.fcache);
 }
 
 static void raw_dump_info(struct image *im)
@@ -2196,8 +2255,8 @@ static void img_fetch_data(struct image *im)
             im->img.trk_sec = 0;
     }
 
-    F_lseek(&im->fp, im->img.trk_off + off);
-    F_read(&im->fp, buf, len, NULL);
+    if (!file_cache_try_read(im->img.fcache, buf, im->img.trk_off + off, len))
+        return;
     process_data(im, buf, len);
 
     rd->prod++;
@@ -2452,6 +2511,10 @@ static bool_t mfm_read_track(struct image *im)
     unsigned int i;
 
     img_fetch_data(im);
+    file_cache_progress(im->img.fcache);
+
+    if (im->img.trk->nr_sectors != 0 && rd->prod == rd->cons)
+        return FALSE; /* Wait for read to complete. */
 
     /* Generate some MFM if there is space in the raw-bitcell ring buffer. */
     bc_p = bc->prod / 16; /* MFM words */
@@ -2571,6 +2634,11 @@ static bool_t mfm_read_track(struct image *im)
 #undef emit_raw
 #undef emit_byte
 
+    if (im->img.trash_bc) {
+        int16_t to_consume = min_t(uint16_t, (bc_p - bc_c)*16, im->img.trash_bc);
+        im->img.trash_bc -= to_consume;
+        bc->cons += to_consume;
+    }
     im->img.decode_pos++;
     bc->prod = bc_p * 16;
 
@@ -2669,6 +2737,10 @@ static bool_t fm_read_track(struct image *im)
     unsigned int i;
 
     img_fetch_data(im);
+    file_cache_progress(im->img.fcache);
+
+    if (im->img.trk->nr_sectors != 0 && rd->prod == rd->cons)
+        return FALSE; /* Wait for read to complete. */
 
     /* Generate some FM if there is space in the raw-bitcell ring buffer. */
     bc_p = bc->prod / 16; /* FM words */
@@ -2776,6 +2848,11 @@ static bool_t fm_read_track(struct image *im)
 #undef emit_raw
 #undef emit_byte
 
+    if (im->img.trash_bc) {
+        int16_t to_consume = min_t(uint16_t, (bc_p - bc_c)*16, im->img.trash_bc);
+        im->img.trash_bc -= to_consume;
+        bc->cons += to_consume;
+    }
     im->img.decode_pos++;
     bc->prod = bc_p * 16;
 
