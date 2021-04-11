@@ -14,8 +14,6 @@
 #define DD_TRACKLEN_BC 101376 /* multiple of 32 */
 #define POST_IDX_GAP_BC 1024
 
-#define MAX_WR_BATCH 11
-
 /* Shift even/odd bits into MFM data-bit positions */
 #define even(x) ((x)>>1)
 #define odd(x) (x)
@@ -56,8 +54,9 @@ static bool_t adf_open(struct image *im)
                               - im->adf.nr_secs * 544 * 16
                               - POST_IDX_GAP_BC);
 
-    volume_cache_init(im->bufs.write_data.p + MAX_WR_BATCH * 512,
-                      im->bufs.write_data.p + im->bufs.write_data.len);
+    im->adf.fcache = file_cache_init(&im->fp, 4,
+            im->bufs.write_data.p + 512,
+            im->bufs.write_data.p + im->bufs.write_data.len);
 
     return TRUE;
 }
@@ -74,6 +73,7 @@ static void adf_setup_track(
         unsigned int sect;
         for (sect = 0; sect < im->adf.nr_secs; sect++)
             im->adf.sec_map[0][sect] = im->adf.sec_map[1][sect] = sect;
+        file_cache_sync_wait(im->adf.fcache);
     }
 
     im->adf.trk_off = track * im->adf.nr_secs * 512;
@@ -103,9 +103,12 @@ static void adf_setup_track(
     bc->prod = bc->cons = 0;
 
     if (start_pos) {
-        image_read_track(im);
-        bc->cons = decode_off;
+        file_cache_readahead(im->adf.fcache,
+                track * im->adf.nr_secs * 512, im->adf.nr_secs * 512,
+                6*1024);
+        im->adf.trash_bc = decode_off;
     } else {
+        file_cache_readahead(im->adf.fcache, 0, 0, 0);
         im->adf.sec_idx = 0;
         im->adf.written_secs = 0;
     }
@@ -124,12 +127,15 @@ static bool_t adf_read_track(struct image *im)
 
     if (rd->prod == rd->cons) {
         unsigned int sector = im->adf.sec_map[hd][im->adf.sec_idx];
-        F_lseek(&im->fp, im->adf.trk_off + sector * sec_sz);
-        F_read(&im->fp, buf, sec_sz, NULL);
+        if (!file_cache_try_read(im->adf.fcache,
+                    buf, im->adf.trk_off + sector * sec_sz, sec_sz))
+            return FALSE;
         rd->prod++;
         im->adf.sec_idx++;
         if (im->adf.sec_idx >= im->adf.nr_secs)
             im->adf.sec_idx = 0;
+    } else {
+        file_cache_progress(im->adf.fcache);
     }
 
     /* Generate some MFM if there is space in the raw-bitcell ring buffer. */
@@ -211,25 +217,16 @@ static bool_t adf_read_track(struct image *im)
 
     }
 
+    if (im->adf.trash_bc) {
+        int16_t to_consume =
+            min_t(uint16_t, (bc_p - bc_c)*16, im->adf.trash_bc);
+        im->adf.trash_bc -= to_consume;
+        bc->cons += to_consume;
+    }
     im->adf.decode_pos++;
     bc->prod = bc_p * 32;
 
     return TRUE;
-}
-
-static void write_batch(struct image *im, unsigned int sect, unsigned int nr)
-{
-    uint32_t *wrbuf = im->bufs.write_data.p;
-    time_t t;
-
-    if (nr == 0)
-        return;
-
-    t = time_now();
-    printk("Write %u/%u-%u... ", im->cur_track, sect, sect+nr-1);
-    F_lseek(&im->fp, im->adf.trk_off + sect*512);
-    F_write(&im->fp, wrbuf, 512*nr, NULL);
-    printk("%u us\n", time_diff(t, time_now()) / TIME_MHZ);
 }
 
 static bool_t adf_write_track(struct image *im)
@@ -242,7 +239,7 @@ static bool_t adf_write_track(struct image *im)
     uint32_t *w, *wrbuf = im->bufs.write_data.p;
     uint32_t c = wr->cons / 32, p = wr->prod / 32;
     uint32_t info, dsum, csum;
-    unsigned int i, sect, batch_sect, batch, max_batch;
+    unsigned int i, sect;
     unsigned int hd = im->cur_track & 1;
 
     /* If we are processing final data then use the end index, rounded up. */
@@ -251,14 +248,7 @@ static bool_t adf_write_track(struct image *im)
     if (flush)
         p = (write->bc_end + 31) / 32;
 
-    batch = batch_sect = 0;
-    max_batch = min_t(unsigned int,
-                      im->bufs.write_data.len / 512,
-                      MAX_WR_BATCH);
-    w = wrbuf;
-
     while ((int16_t)(p - c) >= (542/2)) {
-
         /* Scan for sync word. */
         if (be32toh(buf[c++ & bufmask]) != 0x44894489)
             continue;
@@ -287,19 +277,12 @@ static bool_t adf_write_track(struct image *im)
             continue;
         }
 
-        if (batch && ((sect != batch_sect + batch) || (batch >= max_batch))) {
-            ASSERT(batch <= max_batch);
-            write_batch(im, batch_sect, batch);
-            batch = 0;
-            w = wrbuf;
-        }
-
         /* Data checksum. */
         csum = (buf[c++ & bufmask] & 0x55555555) << 1;
         csum |= buf[c++ & bufmask] & 0x55555555;
 
         /* Data area. Decode to a write buffer and keep a running checksum. */
-        dsum = 0;
+        w = wrbuf;
         for (i = dsum = 0; i < 128; i++) {
             uint32_t o = buf[(c + 128) & bufmask] & 0x55555555;
             uint32_t e = buf[c++ & bufmask] & 0x55555555;
@@ -315,16 +298,20 @@ static bool_t adf_write_track(struct image *im)
             continue;
         }
 
+        file_cache_write(im->adf.fcache, wrbuf, im->adf.trk_off + sect*512, 512);
+        printk("Write %u/%u...\n", im->cur_track, sect);
+
         /* All good: add to the write-out batch. */
         if (!(im->adf.written_secs & (1u<<sect))) {
             im->adf.written_secs |= 1u<<sect;
             im->adf.sec_map[hd][im->adf.sec_idx++] = sect;
         }
-        if (batch++ == 0)
-            batch_sect = sect;
     }
 
-    write_batch(im, batch_sect, batch);
+    if (flush)
+        file_cache_sync(im->adf.fcache);
+    else
+        file_cache_progress(im->adf.fcache);
 
     if (flush && (im->adf.sec_idx != im->adf.nr_secs)) {
         /* End of write: If not all sectors were correctly written,
@@ -338,12 +325,21 @@ static bool_t adf_write_track(struct image *im)
     return flush;
 }
 
+static void adf_sync(struct image *im)
+{
+    file_cache_sync_wait(im->adf.fcache);
+    file_cache_shutdown(im->adf.fcache);
+}
+
 const struct image_handler adf_image_handler = {
     .open = adf_open,
     .setup_track = adf_setup_track,
     .read_track = adf_read_track,
     .rdata_flux = bc_rdata_flux,
     .write_track = adf_write_track,
+    .sync = adf_sync,
+
+    .async = TRUE,
 };
 
 /*
