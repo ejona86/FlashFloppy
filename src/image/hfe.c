@@ -338,6 +338,7 @@ static bool_t hfe_write_track(struct image *im)
     struct write *write = get_write(im, im->wr_cons);
     struct image_buf *wr = &im->bufs.write_bc;
     uint8_t *buf = wr->p;
+    uint8_t b;
     unsigned int bufmask = wr->len - 1;
     uint8_t *w, *wrbuf = im->bufs.write_data.p;
     uint32_t i, space, c = wr->cons / 8, p = wr->prod / 8;
@@ -442,7 +443,14 @@ static bool_t hfe_write_track(struct image *im)
                     break;
                 }
             }
-            w[i++] = _rbit32(buf[c++ & bufmask]) >> 24;
+            b = _rbit32(buf[c++ & bufmask]) >> 24;
+            /* HFEv3 can't handle a run of 1s as it will appear like an opcode.
+             * If we encounter such a run, then either it is garbage or the
+             * file needs twice the bitrate. Assume garbage; a bad bitrate would
+             * fail rapidly. */
+            if (is_v3 && (b & 0xf) == 0xf)
+                b ^= 2;
+            w[i++] = b;
         }
         im->hfe.write_batch.dirty = TRUE;
 
