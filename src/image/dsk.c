@@ -16,7 +16,7 @@
 #define GAP_4A   80 /* Post-Index */
 #define GAP_SYNC 12
 
-#define CHUNK_SIZE 1024
+#define CHUNK_SIZE 256
 
 struct dib { /* disk info */
     char sig[34];
@@ -105,8 +105,10 @@ static bool_t dsk_open(struct image *im)
      * length and thus the period between index pulses. */
     im->ticks_per_cell = im->write_bc_ticks * 16;
 
-    volume_cache_init(im->bufs.write_data.p + 512 + CHUNK_SIZE,
-                      im->bufs.write_data.p + im->bufs.write_data.len);
+    im->dsk.fcache = file_cache_init(&im->fp, 2,
+            im->bufs.write_data.p + 512 + max_t(unsigned int, CHUNK_SIZE, 512),
+            im->bufs.write_data.p + im->bufs.write_data.len);
+    im->cur_track = ~0;
 
     return TRUE;
 }
@@ -118,7 +120,9 @@ static void dsk_seek_track(
     struct tib *tib = tib_p(im);
     unsigned int i, nr;
     uint32_t tracklen;
+    uint32_t trk_len;
 
+    file_cache_sync_wait(im->dsk.fcache);
     im->cur_track = track;
 
     if (cyl >= im->nr_cyls) {
@@ -136,13 +140,14 @@ static void dsk_seek_track(
             goto unformatted;
         for (i = 0; i < nr; i++)
             im->dsk.trk_off += dib->track_szs[i] * 256;
+        trk_len = dib->track_szs[nr] * 256;
     } else {
         im->dsk.trk_off += nr * le16toh(dib->track_sz);
+        trk_len = le16toh(dib->track_sz);
     }
 
     /* Read the Track Info Block and Sector Info Blocks. */
-    F_lseek(&im->fp, im->dsk.trk_off);
-    F_read(&im->fp, tib, 256, NULL);
+    file_cache_read(im->dsk.fcache, tib, im->dsk.trk_off, 256);
     im->dsk.trk_off += 256;
     if (strncmp(tib->sig, "Track-Info", 10) || !tib->nr_secs)
         goto unformatted;
@@ -160,6 +165,8 @@ static void dsk_seek_track(
         tib->sib[i].actual_length = im->dsk.extended
             ? le16toh(tib->sib[i].actual_length)
             : 128 << min_t(unsigned, tib->sec_sz, 8);
+
+    file_cache_readahead(im->dsk.fcache, im->dsk.trk_off, trk_len, 6*1024);
 
 out:
     im->dsk.idx_sz = GAP_4A;
@@ -277,8 +284,7 @@ static void dsk_setup_track(
     if (start_pos) {
         decode_off = calc_start_pos(im);
 
-        image_read_track(im);
-        bc->cons = decode_off * 16;
+        im->dsk.trash_bc = decode_off * 16;
         *start_pos = start_ticks;
     } else {
         im->dsk.decode_pos = 0;
@@ -298,6 +304,7 @@ static bool_t dsk_read_track(struct image *im)
 
     if (tib->nr_secs && (rd->prod == rd->cons)) {
         uint16_t off = 0, len;
+        bool_t partial = FALSE;
         for (i = 0; i < im->dsk.trk_pos; i++)
             off += tib->sib[i].actual_length;
         len = data_sz(&tib->sib[i]);
@@ -309,6 +316,12 @@ static bool_t dsk_read_track(struct image *im)
         len -= im->dsk.rd_sec_pos * CHUNK_SIZE;
         if (len > CHUNK_SIZE) {
             len = CHUNK_SIZE;
+            partial = TRUE;
+        }
+        if (!file_cache_try_read(im->dsk.fcache, buf, im->dsk.trk_off + off, len))
+            return FALSE;
+
+        if (partial) {
             im->dsk.rd_sec_pos++;
         } else {
             im->dsk.rd_sec_pos = 0;
@@ -317,10 +330,9 @@ static bool_t dsk_read_track(struct image *im)
                 im->dsk.rev++;
             }
         }
-        F_lseek(&im->fp, im->dsk.trk_off + off);
-        F_read(&im->fp, buf, len, NULL);
         rd->prod++;
     }
+    file_cache_progress(im->dsk.fcache);
 
     /* Generate some MFM if there is space in the raw-bitcell ring buffer. */
     bc_p = bc->prod / 16; /* MFM words */
@@ -441,6 +453,11 @@ static bool_t dsk_read_track(struct image *im)
         }
     }
 
+    if (im->dsk.trash_bc) {
+        int16_t to_consume = min_t(uint16_t, (bc_p - bc_c)*16, im->dsk.trash_bc);
+        im->dsk.trash_bc -= to_consume;
+        bc->cons += to_consume;
+    }
     im->dsk.decode_pos++;
     bc->prod = bc_p * 16;
 
@@ -484,7 +501,6 @@ static bool_t dsk_write_track(struct image *im)
     uint8_t *wrbuf = (uint8_t *)im->bufs.write_data.p + 512; /* skip DIB/TIB */
     uint32_t c = wr->cons / 16, p = wr->prod / 16;
     unsigned int i, off;
-    time_t t;
     uint16_t crc = im->dsk.crc;
 
     /* If we are processing final data then use the end index, rounded up. */
@@ -563,7 +579,7 @@ static bool_t dsk_write_track(struct image *im)
 
             if (im->dsk.decode_data_pos < sec_sz) {
                 unsigned int nr = sec_sz - im->dsk.decode_data_pos;
-                nr = min_t(unsigned int, nr, CHUNK_SIZE - (off & 511));
+                nr = min_t(unsigned int, nr, 512 - (off & 511));
                 if ((int16_t)(p - c) < nr)
                     break;
 
@@ -571,20 +587,20 @@ static bool_t dsk_write_track(struct image *im)
                     crc = MFM_DAM_CRC;
                     log("Write %d[%02x]/%u...",
                             sec_nr, tib->sib[sec_nr].r, tib->nr_secs);
-                    F_lseek(&im->fp, off);
+
+                    /* Sectors less than 512 bytes require read-then-write, so
+                     * benefit from readahead. Larger sectors don't need
+                     * readahead and can benefit from faster write throughput.
+                     */
+                    if (sec_sz >= 512)
+                        file_cache_readahead(im->img.fcache, 0, 0, 0);
                 }
 
-                t = time_now();
                 mfm_ring_to_bin(buf, bufmask, c, wrbuf, nr);
                 c += nr;
                 crc = crc16_ccitt(wrbuf, nr, crc);
-                F_write(&im->fp, wrbuf, nr, NULL);
-                printk(" %u us", time_diff(t, time_now()) / TIME_MHZ);
+                file_cache_write(im->dsk.fcache, wrbuf, off, nr);
                 im->dsk.decode_data_pos += nr;
-                if (im->dsk.decode_data_pos < sec_sz)
-                    printk("...");
-                else
-                    printk("\n");
             }
 
             if (im->dsk.decode_data_pos < sec_sz)
@@ -607,9 +623,19 @@ static bool_t dsk_write_track(struct image *im)
         }
     }
 
+    if (flush)
+        file_cache_sync(im->dsk.fcache);
+    else
+        file_cache_progress(im->dsk.fcache);
     im->dsk.crc = crc;
     wr->cons = c * 16;
     return flush;
+}
+
+static void dsk_sync(struct image *im)
+{
+    file_cache_sync_wait(im->dsk.fcache);
+    file_cache_shutdown(im->dsk.fcache);
 }
 
 const struct image_handler dsk_image_handler = {
@@ -618,6 +644,8 @@ const struct image_handler dsk_image_handler = {
     .read_track = dsk_read_track,
     .rdata_flux = bc_rdata_flux,
     .write_track = dsk_write_track,
+    .sync = dsk_sync,
+    .async = TRUE,
 };
 
 /*

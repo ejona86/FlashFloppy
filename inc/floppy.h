@@ -121,6 +121,7 @@ struct img_image {
 };
 
 struct dsk_image {
+    struct file_cache *fcache;
     uint32_t trk_off;
     uint16_t trk_pos;
     uint16_t rd_sec_pos;
@@ -129,6 +130,7 @@ struct dsk_image {
     bool_t extended;
     int8_t write_sector;
     uint16_t gap4;
+    uint16_t trash_bc; /* Number of bitcells to throw away. */
     uint32_t idx_sz, idam_sz;
     uint16_t dam_sz_pre, dam_sz_post;
     uint8_t rev;
