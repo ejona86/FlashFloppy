@@ -61,18 +61,11 @@ struct hfe_image {
 };
 
 struct qd_image {
+    struct file_cache *fcache;
     uint16_t tb;
     uint32_t trk_off;
     uint32_t trk_pos, trk_len;
     uint32_t win_start, win_end;
-    struct {
-        uint32_t start;
-        bool_t wrapped;
-    } write;
-    struct {
-        uint32_t off, len;
-        bool_t dirty;
-    } write_batch;
 };
 
 struct raw_sec {
