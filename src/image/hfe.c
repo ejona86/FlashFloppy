@@ -457,41 +457,46 @@ static bool_t hfe_write_track(struct image *im)
         }
         im->hfe.fresh_seek = FALSE;
 
-        for (; i < nr; i++) {
-            if (is_v3 && (*w & 0xf) == 0xf) {
-                switch (*w >> 4) {
-                case OP_skip:
-                    /* Don't bother; these bits are unlikely to matter. */
-                    w++;
-                    i++;
-                    /* fallthrough */
-                case OP_bitrate:
-                    /* Assume bitrate does not change for the entire track, and
-                     * write_bc_ticks already adjusted when reading. */
-                    w++;
-                    i++;
-                    /* fallthrough */
-                case OP_nop:
-                case OP_index:
-                default:
-                    /* Preserve opcode. But making sure not to write past end of
-                     * buffer. */
-                    w++;
-                    continue;
+        if (!is_v3) {
+            for (; i < nr; i++)
+                *w++ = _rbit32(buf[c++ & bufmask]) >> 24;
+        } else {
+            for (; i < nr; i++) {
+                if ((*w & 0xf) == 0xf) {
+                    switch (*w >> 4) {
+                    case OP_skip:
+                        /* Don't bother; these bits are unlikely to matter. */
+                        w++;
+                        i++;
+                        /* fallthrough */
+                    case OP_bitrate:
+                        /* Assume bitrate does not change for the entire track, and
+                         * write_bc_ticks already adjusted when reading. */
+                        w++;
+                        i++;
+                        /* fallthrough */
+                    case OP_nop:
+                    case OP_index:
+                    default:
+                        /* Preserve opcode. But making sure not to write past end of
+                         * buffer. */
+                        w++;
+                        continue;
 
-                case OP_rand:
-                    /* Replace with data. */
-                    break;
+                    case OP_rand:
+                        /* Replace with data. */
+                        break;
+                    }
                 }
+                b = _rbit32(buf[c++ & bufmask]) >> 24;
+                /* HFEv3 can't handle a run of 1s as it will appear like an opcode.
+                 * If we encounter such a run, then either it is garbage or the
+                 * file needs twice the bitrate. Assume garbage; a bad bitrate would
+                 * fail rapidly. */
+                if ((b & 0xf) == 0xf)
+                    b ^= 2;
+                *w++ = b;
             }
-            b = _rbit32(buf[c++ & bufmask]) >> 24;
-            /* HFEv3 can't handle a run of 1s as it will appear like an opcode.
-             * If we encounter such a run, then either it is garbage or the
-             * file needs twice the bitrate. Assume garbage; a bad bitrate would
-             * fail rapidly. */
-            if (is_v3 && (b & 0xf) == 0xf)
-                b ^= 2;
-            *w++ = b;
         }
 
         /* Stay aligned to track side. */
