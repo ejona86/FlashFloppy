@@ -33,7 +33,7 @@ struct dma_ring {
     uint16_t cons;
     union {
         uint16_t prod; /* dma_rd: our producer index for flux samples */
-        uint16_t prev_sample; /* dma_wr: previous CCRx sample value */
+        uint16_t prev_sample_unused; /* dma_wr: previous CCRx sample value */
     };
     /* DMA ring buffer of timer values (ARR or CCRx). */
     uint16_t buf[1024];
@@ -328,6 +328,8 @@ static void timer_dma_init(void)
     tim_wdata->ccmr1 = TIM_CCMR1_CC1S(TIM_CCS_INPUT_TI1);
     tim_wdata->dier = TIM_DIER_CC1DE;
     tim_wdata->cr2 = 0;
+    tim_wdata->smcr &= TIM_SMCR_RES;
+    tim_wdata->smcr |= TIM_SMCR_TS_TI1FP1 | TIM_SMCR_SMS_RESET;
 
     /* DMA setup: From the WDATA Timer's CCRx into a circular buffer. */
     dma_wdata.cpar = (uint32_t)(unsigned long)&tim_wdata->ccr1;
@@ -500,9 +502,10 @@ static void rdata_start(void)
     dma_rd->state = DMA_active;
 
     /* Start timer. */
+    tim_rdata->arr = 1; /* prime timer with short dummy duration. The following pulse will be from DMA. FIXME: use EGR twice? */
     tim_rdata->egr = TIM_EGR_UG;
     tim_rdata->sr = 0; /* dummy write, gives h/w time to process EGR.UG=1 */
-    tim_rdata->cr1 = TIM_CR1_CEN;
+    tim_rdata->cr1 = TIM_CR1_CEN | TIM_CR1_ARPE;
 
     /* Enable output. */
     if (drive.sel)
@@ -675,6 +678,7 @@ static void IRQ_rdata_dma(void)
 
     /* We crossed the index mark: Synchronise index pulse to the bitstream. */
     for (;;) {
+        dma_rd->cons = ARRAY_SIZE(dma_rd->buf) - dma_rdata.cndtr;
         /* Snapshot current position in flux stream, including progress through
          * current timer sample. */
         now = time_now();
@@ -701,7 +705,7 @@ static void IRQ_rdata_dma(void)
 static void IRQ_wdata_dma(void)
 {
     const uint16_t buf_mask = ARRAY_SIZE(dma_wr->buf) - 1;
-    uint16_t cons, prod, prev, curr, next;
+    uint16_t cons, prod, curr;
     uint16_t cell = image->write_bc_ticks, window;
     uint32_t bc_dat = 0, bc_prod;
     uint32_t *bc_buf = image->bufs.write_bc.p;
@@ -729,13 +733,10 @@ static void IRQ_wdata_dma(void)
     }
 
     /* Process the flux timings into the raw bitcell buffer. */
-    prev = dma_wr->prev_sample;
     bc_prod = image->bufs.write_bc.prod;
     bc_dat = image->write_bc_window;
     for (cons = dma_wr->cons; cons != prod; cons = (cons+1) & buf_mask) {
-        next = dma_wr->buf[cons];
-        curr = next - prev;
-        prev = next;
+        curr = dma_wr->buf[cons]+2;
         while (curr > window) {
             curr -= cell;
             bc_dat <<= 1;
@@ -773,14 +774,12 @@ static void IRQ_wdata_dma(void)
         /* Initialise decoder state for the start of the next write. */
         bc_prod = (bc_prod + 31) & ~31;
         bc_dat = ~0;
-        prev = 0;
     }
 
     /* Save our progress for next time. */
     image->write_bc_window = bc_dat;
     image->bufs.write_bc.prod = bc_prod;
     dma_wr->cons = cons;
-    dma_wr->prev_sample = prev;
 }
 
 void floppy_sync(void)

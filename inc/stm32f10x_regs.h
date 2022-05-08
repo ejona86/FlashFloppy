@@ -463,6 +463,10 @@ struct tim {
 #define TIM_CR2_TI1S         (1u<<7)
 #define TIM_CR2_CCDS         (1u<<3)
 
+#define TIM_SMCR_RES         (8u)
+#define TIM_SMCR_TS_TI1FP1   (5u<<4)
+#define TIM_SMCR_SMS_RESET   (4u)
+
 #define TIM_DIER_TDE         (1u<<14)
 #define TIM_DIER_CC4DE       (1u<<12)
 #define TIM_DIER_CC3DE       (1u<<11)
