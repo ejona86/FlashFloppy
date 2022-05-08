@@ -661,11 +661,14 @@ static void IRQ_rdata_dma(void)
     if (done != nr) {
         /* Read buffer ran dry: kick us when more data is available. */
         dma_rd->kick_dma_irq = TRUE;
+        gpio_configure_pin(gpio_rdata, pin_rdata, GPO_rdata); /* ST506 hack. Unlikely to be refilled in time. Make the problem obvious. */
         printk("kick_dma_irq\n");
     } else if (nr_to_cons - nr >= ARRAY_SIZE(dma_rd->buf)/2) {
         /* Substantial amount left unprocessed. */
         /* We didn't fill the ring: re-enter this ISR to do more work. */
         IRQx_set_pending(dma_rdata_irq);
+    } else {
+        gpio_configure_pin(gpio_rdata, pin_rdata, AFO_rdata); /* ST506 hack */
     }
 
 #if !defined(QUICKDISK)
