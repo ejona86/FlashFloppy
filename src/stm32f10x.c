@@ -210,6 +210,8 @@ void stm32_init(void)
     clock_init();
     peripheral_init();
     cpu_sync();
+    dcb->demcr |= DCB_DEMCR_TRCENA;
+    dwt->ctrl |= DWT_CTRL_CYCCNTENA;
 }
 
 void delay_ticks(unsigned int ticks)

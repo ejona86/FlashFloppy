@@ -12,7 +12,9 @@
 /* C pointer types */
 #define STK volatile struct stk * const
 #define SCB volatile struct scb * const
+#define DCB volatile struct dcb * const
 #define NVIC volatile struct nvic * const
+#define DWT volatile struct dwt * const
 #define DBG volatile struct dbg * const
 #define FLASH volatile struct flash * const
 #define PWR volatile struct pwr * const
@@ -31,7 +33,9 @@
 /* C-accessible registers. */
 static STK stk = (struct stk *)STK_BASE;
 static SCB scb = (struct scb *)SCB_BASE;
+static DCB dcb = (struct dcb *)DCB_BASE;
 static NVIC nvic = (struct nvic *)NVIC_BASE;
+static DWT dwt = (struct dwt *)DWT_BASE;
 static DBG dbg = (struct dbg *)DBG_BASE;
 static FLASH flash = (struct flash *)FLASH_BASE;
 static PWR pwr = (struct pwr *)PWR_BASE;

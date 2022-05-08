@@ -90,6 +90,18 @@ struct scb {
 
 #define SCB_BASE 0xe000ed00
 
+/* Debug control block */
+struct dcb {
+    uint32_t dhcsr;
+    uint32_t dcrsr;
+    uint32_t dcrdr;
+    uint32_t demcr;
+};
+
+#define DCB_DEMCR_TRCENA (1u<<24)
+
+#define DCB_BASE 0xe000edf0
+
 /* Nested vectored interrupt controller */
 struct nvic {
     uint32_t iser[32]; /*  00: Interrupt set-enable */
@@ -101,6 +113,42 @@ struct nvic {
 };
 
 #define NVIC_BASE 0xe000e100
+
+/* Data watchpoint and trace */
+struct dwt {
+    uint32_t ctrl;     /* 00: Control */
+    uint32_t cyccnt;   /* 04: Cycle count */
+    uint32_t cpicnt;   /* 08: CPI count */
+    uint32_t exccnt;   /* 0C: Exception overhead count */
+    uint32_t sleepcnt; /* 10: Sleep count */
+    uint32_t lsucnt;   /* 14: LSU count */
+    uint32_t foldcnt;  /* 18: Folded-instruction count */
+    uint32_t pcsr;     /* 1C: Program counter sample */
+    struct {
+        uint32_t comp;     /* +00: Comparator */
+        uint32_t mask;     /* +04: Mask */
+        uint32_t function; /* +08: Function */
+        uint32_t rsvd;     /* +0C: - */
+    } comp[14];         /* 20..: Limited by NUMCOMP in ctrl */
+};
+
+#define DWT_CTRL_NUMCOMP_MASK (15u<<28)
+#define DWT_CTRL_NOTRCPKT     (1u<<27)
+#define DWT_CTRL_NOEXTPKT     (1u<<26)
+#define DWT_CTRL_NOCYCPKT     (1u<<25)
+#define DWT_CTRL_NOPRFPKT     (1u<<24)
+#define DWT_CTRL_CYCEVTENA    (1u<<22)
+#define DWT_CTRL_FOLDEVTENA   (1u<<21)
+#define DWT_CTRL_LSUEVTENA    (1u<<20)
+#define DWT_CTRL_SLEEPEVTENA  (1u<<19)
+#define DWT_CTRL_EXCEVTENA    (1u<<18)
+#define DWT_CTRL_CPIEVTENA    (1u<<17)
+#define DWT_CTRL_EXCTRCENA    (1u<<16)
+#define DWT_CTRL_PCSAMPLENA   (1u<<12)
+#define DWT_CTRL_SYNCTAP      (1u<<10)
+#define DWT_CTRL_CYCCNTENA    (1u<<0)
+
+#define DWT_BASE 0xe0001000
 
 struct dbg {
     uint32_t mcu_idcode; /* 00: MCU ID code */
