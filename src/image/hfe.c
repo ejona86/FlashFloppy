@@ -287,10 +287,10 @@ static bool_t hfe_read_track(struct image *im)
                256);
         rd->cons += 512;
         bc_p += 256;
-    }
 
-    barrier();
-    bc->prod = bc_p * 8;
+        barrier();
+        bc->prod = bc_p * 8;
+    }
 
     return TRUE;
 }
