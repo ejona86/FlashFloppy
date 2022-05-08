@@ -36,7 +36,7 @@ struct dma_ring {
         uint16_t prev_sample_unused; /* dma_wr: previous CCRx sample value */
     };
     /* DMA ring buffer of timer values (ARR or CCRx). */
-    uint16_t buf[1024];
+    uint16_t buf[2*1024];
 };
 
 /* DMA buffers are permanently allocated while a disk image is loaded, allowing 
