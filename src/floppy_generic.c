@@ -694,6 +694,7 @@ static void IRQ_rdata_dma(void)
         ticks = tim_rdata->arr - tim_rdata->cnt;
         /* Index of next sample. */
         dmacons = ARRAY_SIZE(dma_rd->buf) - dma_rdata.cndtr;
+        break; // FIXME
         /* If another sample was loaded meanwhile, try again for a consistent
          * snapshot. */
         if (dmacons == dma_rd->cons)
