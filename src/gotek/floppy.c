@@ -329,6 +329,7 @@ static void IRQ_SIDE_changed(void)
 static void IRQ_WGATE_changed(void)
 {
     struct drive *drv = &drive;
+    time_t wdata_started = time_now();
 
     /* Clear WGATE-changed flag. */
     exti->pr = m(pin_wgate);
@@ -342,7 +343,7 @@ static void IRQ_WGATE_changed(void)
         wdata_stop();
     } else {
         rdata_stop();
-        wdata_start();
+        wdata_start(wdata_started);
     }
 }
 

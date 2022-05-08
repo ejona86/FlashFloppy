@@ -89,7 +89,7 @@ static struct {
 
 static unsigned int drive_calc_track(struct drive *drv);
 static void rdata_stop(void);
-static void wdata_start(void);
+static void wdata_start(time_t wdata_started);
 static void wdata_stop(void);
 
 struct exti_irq {
@@ -416,7 +416,7 @@ static void wdata_stop(void)
 #endif
 }
 
-static void wdata_start(void)
+static void wdata_start(time_t wdata_started)
 {
     struct write *write;
     uint32_t start_pos;
@@ -455,7 +455,7 @@ static void wdata_start(void)
     tim_wdata->cr1 = TIM_CR1_CEN;
 
     /* Find rotational start position of the write, in SYSCLK ticks. */
-    start_pos = max_t(int32_t, 0, time_diff(index.prev_time, time_now()));
+    start_pos = max_t(int32_t, 0, time_diff(index.prev_time, wdata_started));
     start_pos %= drive.image->stk_per_rev;
     start_pos *= SYSCLK_MHZ / STK_MHZ;
     write = get_write(image, image->wr_prod);
