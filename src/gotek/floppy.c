@@ -39,7 +39,8 @@ static uint8_t pin_26 = 6; /* PB6 */
 #define dma_wdata_irq 12
 void IRQ_12(void) __attribute__((alias("IRQ_wdata_dma")));
 
-#define pin_rdata   7
+#define gpio_rdata  gpioc
+#define pin_rdata   6
 #define tim_rdata   (tim3)
 #define dma_rdata   (dma1->ch[3-1])
 #define dma_rdata_ch 3
@@ -184,7 +185,7 @@ static void _IRQ_SELA_changed(uint32_t _gpio_out_active)
         gpioa->brr = _gpio_out_active >> 16;
         /* Set pin_rdata as timer output (AFO_bus). */
         if (dma_rd && (dma_rd->state == DMA_active))
-            gpio_data->crl = (gpio_data->crl & ~(0xfu<<(pin_rdata<<2)))
+            gpio_rdata->crl = (gpio_rdata->crl & ~(0xfu<<(pin_rdata<<2)))
                 | ((AFO_bus&0xfu)<<(pin_rdata<<2));
         /* Let main code know it can drive the bus until further notice. */
         drive.sel = 1;
@@ -195,7 +196,7 @@ static void _IRQ_SELA_changed(uint32_t _gpio_out_active)
         gpioa->bsrr = _gpio_out_active >> 16;
         /* Set pin_rdata as quiescent (GPO_bus). */
         if (dma_rd && (dma_rd->state == DMA_active))
-            gpio_data->crl = (gpio_data->crl & ~(0xfu<<(pin_rdata<<2)))
+            gpio_rdata->crl = (gpio_rdata->crl & ~(0xfu<<(pin_rdata<<2)))
                 | ((GPO_bus&0xfu)<<(pin_rdata<<2));
         /* Tell main code to leave the bus alone. */
         drive.sel = 0;

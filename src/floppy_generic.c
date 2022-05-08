@@ -280,6 +280,7 @@ static void floppy_mount(struct slot *slot)
 /* Initialise timers and DMA for RDATA/WDATA. */
 static void timer_dma_init(void)
 {
+    bool_t st506 = TRUE;
     /* Enable DMA interrupts. */
     dma1->ifcr = DMA_IFCR_CGIF(dma_rdata_ch) | DMA_IFCR_CGIF(dma_wdata_ch);
     IRQx_set_prio(dma_rdata_irq, RDATA_IRQ_PRI);
@@ -295,10 +296,17 @@ static void timer_dma_init(void)
      * the time between (fixed-width) O_TRUE pulses, mimicking floppy drive 
      * timings. */
     tim_rdata->psc = 0;
-    tim_rdata->ccmr1 = (TIM_CCMR1_CC2S(TIM_CCS_OUTPUT) |
-                        TIM_CCMR1_OC2M(TIM_OCM_PWM1));
-    tim_rdata->ccer = TIM_CCER_CC2E | ((O_TRUE==0) ? TIM_CCER_CC2P : 0);
-    tim_rdata->ccr2 = sysclk_ns(400);
+    if (!st506) {
+        tim_rdata->ccmr1 = (TIM_CCMR1_CC2S(TIM_CCS_OUTPUT) |
+                            TIM_CCMR1_OC2M(TIM_OCM_PWM1));
+        tim_rdata->ccer = TIM_CCER_CC2E | ((O_TRUE==0) ? TIM_CCER_CC2P : 0);
+        tim_rdata->ccr2 = sysclk_ns(400);
+    } else {
+        tim_rdata->ccmr1 = (TIM_CCMR1_CC1S(TIM_CCS_OUTPUT) |
+                            TIM_CCMR1_OC1M(TIM_OCM_PWM1));
+        tim_rdata->ccer = TIM_CCER_CC1E | ((O_TRUE==0) ? TIM_CCER_CC1P : 0);
+        tim_rdata->ccr1 = sysclk_ns(120);
+    }
     tim_rdata->dier = TIM_DIER_UDE;
     tim_rdata->cr2 = 0;
 
@@ -478,7 +486,7 @@ static void rdata_stop(void)
         return;
 
     /* Turn off the output pin */
-    gpio_configure_pin(gpio_data, pin_rdata, GPO_rdata);
+    gpio_configure_pin(gpio_rdata, pin_rdata, GPO_rdata);
 
     /* Turn off timer. */
     tim_rdata->cr1 = 0;
@@ -509,7 +517,7 @@ static void rdata_start(void)
 
     /* Enable output. */
     if (drive.sel)
-        gpio_configure_pin(gpio_data, pin_rdata, AFO_rdata);
+        gpio_configure_pin(gpio_rdata, pin_rdata, AFO_rdata);
 
     /* Exit head-settling state. Ungates INDEX signal. */
     cmpxchg(&drive.step.state, STEP_settling, 0);

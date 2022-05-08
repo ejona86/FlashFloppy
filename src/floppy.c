@@ -11,7 +11,7 @@
 
 #define GPI_bus GPI_floating
 #define GPO_bus GPO_pushpull(_2MHz,O_FALSE)
-#define AFO_bus (AFO_pushpull(_2MHz) | (O_FALSE<<4))
+#define AFO_bus (AFO_pushpull(_10MHz) | (O_FALSE<<4))
 
 #define GPO_rdata GPO_bus
 #define AFO_rdata AFO_bus
@@ -304,7 +304,7 @@ void floppy_init(void)
     drive_configure_output_pin(pin_34);
 
     gpio_configure_pin(gpio_data, pin_wdata, GPI_bus);
-    gpio_configure_pin(gpio_data, pin_rdata, GPO_bus);
+    gpio_configure_pin(gpio_rdata, pin_rdata, GPO_bus);
 
     drive_change_output(drv, outp_dskchg, TRUE);
     drive_change_output(drv, outp_wrprot, TRUE);

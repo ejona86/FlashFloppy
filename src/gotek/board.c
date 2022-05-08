@@ -72,7 +72,7 @@ unsigned int board_get_buttons(void)
      *  PC6 = Select, PC7 = Left, PC8 = Right. */
     if (!is_48pin_mcu && !is_32pin_mcu)
         x &= _rbit32(gpioc->idr) >> 23;
-    x = ~x & 7;
+    x = ~x & 3;//7;
     if (has_kc30_header) {
         /* KC30 Select pin, Artery models only: 
          *  PF6 = Select; except QFN32: PA10 = Select. */
@@ -148,7 +148,7 @@ void board_init(void)
     gpio_configure_pin(gpioa, 12, GPI_pull_down);
 
     /* Pull up all PCx pins. */
-    gpio_pull_up_pins(gpioc, ~0x0000);
+    gpio_pull_up_pins(gpioc, ~0x0040);
 
     /* Wait for ID to stabilise at PC[15:12]. */
     delay_us(100);

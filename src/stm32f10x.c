@@ -195,7 +195,7 @@ static void peripheral_init(void)
     rcc->ahbenr = RCC_AHBENR_DMA1EN;
 
     /* Turn off JTAG and reclaim the GPIOs. */
-    afio->mapr = AFIO_MAPR_SWJ_CFG_SWDP;
+    afio->mapr = AFIO_MAPR_SWJ_CFG_SWDP | (3 << 10); // TIM3_REMAP FULL
 
     /* All pins in a stable state. */
     gpio_init(gpioa);
