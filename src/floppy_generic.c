@@ -341,12 +341,12 @@ static void timer_dma_init(void)
      * no input prescaling or filtering. Samples are captured on the falling 
      * edge of the input (CCxP=1). DMA is used to copy the sample into a ring
      * buffer for batch processing in the DMA-completion ISR. */
-    tim_wdata->psc = 0;
-    tim_wdata->arr = 0xffff;
-    tim_wdata->ccmr1 = TIM_CCMR1_CC1S(TIM_CCS_INPUT_TI1);
-    tim_wdata->dier = TIM_DIER_CC1DE;
     tim_wdata->cr2 = 0;
     tim_wdata->smcr = TIM_SMCR_TS_TI1FP1 | TIM_SMCR_SMS_RESET;
+    tim_wdata->dier = TIM_DIER_CC1DE;
+    tim_wdata->ccmr1 = TIM_CCMR1_CC1S(TIM_CCS_INPUT_TI1);
+    tim_wdata->psc = 0;
+    tim_wdata->arr = 0xffff;
 
     /* DMA setup: From the WDATA Timer's CCRx into a circular buffer. */
     dma_wdata.cpar = (uint32_t)(unsigned long)&tim_wdata->ccr1;
