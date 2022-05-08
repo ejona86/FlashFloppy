@@ -268,7 +268,7 @@ static void IRQ_STEP_changed(void)
         return;
 
     /* Deassert DSKCHG if a disk is inserted. */
-    if ((drv->outp & m(outp_dskchg)) && drv->inserted
+    if (FALSE && (drv->outp & m(outp_dskchg)) && drv->inserted
         && (ff_cfg.chgrst == CHGRST_step))
         drive_change_output(drv, outp_dskchg, FALSE);
 
@@ -371,7 +371,7 @@ static void IRQ_MOTOR(struct drive *drv)
 
 static void IRQ_CHGRST(struct drive *drv)
 {
-    if ((ff_cfg.chgrst == CHGRST_pa14)
+    if (FALSE && (ff_cfg.chgrst == CHGRST_pa14)
         && (gpio_read_pin(gpioa, pin_chgrst) == O_TRUE)
         && drv->inserted) {
         drive_change_output(drv, outp_dskchg, FALSE);

@@ -465,6 +465,7 @@ static void floppy_sync_flux(void)
     }
 
     rdata_start();
+    drive_change_output(&drive, outp_dskchg, TRUE); /* SEEK COMPLETE */
 }
 
 static bool_t dma_rd_handle(struct drive *drv)
@@ -633,7 +634,7 @@ static void index_custom_assert(void *dat)
 static void chgrst_timer(void *_drv)
 {
     struct drive *drv = _drv;
-    drive_change_output(drv, outp_dskchg, FALSE);
+    if (FALSE) drive_change_output(drv, outp_dskchg, FALSE);
 }
 
 static void drive_step_timer(void *_drv)
@@ -675,6 +676,7 @@ static void IRQ_soft(void)
     struct drive *drv = &drive;
 
     if (drv->step.state == STEP_started) {
+        drive_change_output(&drive, outp_dskchg, FALSE); /* SEEK COMPLETE */
         timer_cancel(&drv->step.timer);
         drv->step.state = STEP_latched;
         timer_set(&drv->step.timer, drv->step.start + time_ms(1));
