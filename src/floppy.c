@@ -678,7 +678,7 @@ static void IRQ_soft(void)
         drive_change_output(&drive, outp_dskchg, FALSE); /* SEEK COMPLETE */
         timer_cancel(&drv->step.timer);
         drv->step.state = STEP_latched;
-        timer_set(&drv->step.timer, drv->step.start + time_ms(1));
+        timer_set(&drv->step.timer, drv->step.start + time_ms(4));
     }
 
     if (index.fake_fired) {
