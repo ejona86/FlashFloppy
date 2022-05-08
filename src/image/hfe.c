@@ -231,7 +231,15 @@ static void hfe_setup_track(
 
     if (start_pos) {
         /* Read mode. */
+        /* ST506 hack: batch read entire track. */
+        ring_io_seek(&im->hfe.ring_io, 0, FALSE, FALSE);
+        ring_io_progress(&im->hfe.ring_io);
+
         ring_io_seek(&im->hfe.ring_io, im->cur_bc/8 / 256 * 512, FALSE, FALSE);
+        if (im->cur_bc&1) { /* Align to even bit. */
+            im->cur_bc++;
+            sys_ticks++;
+        }
         /* Consumer may be ahead of producer, but only until the first read
          * completes. */
         bc->cons = im->cur_bc % (256*8);
@@ -451,7 +459,7 @@ static uint16_t hfe_rdata_flux(struct image *im, uint16_t *tbuf, uint16_t nr)
         bc_c += 8 - y;
         im->cur_bc += 8 - y;
         im->cur_ticks += (8 - y) * ticks_per_cell;
-        y += y&1; // FIXME
+        ASSERT((y&1) == 0);
         while (y < 8) {
             y += 2;
             *(tbuf++) = explode2le[x&3] * (ticks_per_cell/16) + 1;
