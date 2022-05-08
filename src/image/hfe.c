@@ -235,6 +235,7 @@ static void hfe_setup_track(
         ring_io_seek(&im->hfe.ring_io, 0, FALSE, FALSE);
         ring_io_progress(&im->hfe.ring_io);
 
+        im->hfe.ring_io.disable_writing = 0; /* ST506 hack */
         ring_io_seek(&im->hfe.ring_io, im->cur_bc/8 / 256 * 512, FALSE, FALSE);
         if (im->cur_bc&1) { /* Align to even bit. */
             im->cur_bc++;
@@ -248,6 +249,7 @@ static void hfe_setup_track(
         uint32_t pos = im->cur_bc / 8 / 256 * 512
                      + im->cur_bc / 8 % 256
                      + (im->cur_track & 1) * 256;
+        im->hfe.ring_io.disable_writing = 1; /* ST506 hack */
         /* Write mode. */
         ring_io_seek(&im->hfe.ring_io, pos, TRUE, FALSE);
         im->hfe.fresh_seek = TRUE;

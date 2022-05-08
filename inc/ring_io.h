@@ -50,6 +50,7 @@ struct ring_io {
     bool_t writing:1; /* The caller is writing, per ring_io_seek. */
     bool_t shadow_active:1; /* The caller is using shadow ring, per ring_io_seek. */
     bool_t disable_reading:1; /* Inhibit read ops in the I/O scheduler. */
+    bool_t disable_writing:1; /* Inhibit write ops in the I/O scheduler. */
 };
 
 /* shadow_off != ~0 maintains a second parallel ring of the same size that

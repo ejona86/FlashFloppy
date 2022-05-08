@@ -283,7 +283,7 @@ static void enqueue_io(struct ring_io *rio)
         return;
     }
 
-    if (rio->sync_needed) {
+    if (!rio->disable_writing && rio->sync_needed) {
         if (BIT_ANY(rio->dirty_bitfield))
             write_start(rio);
         else if (rio->sync_requested)
@@ -300,7 +300,9 @@ void ring_io_sync(struct ring_io *rio)
     /* Write out as quickly as possible. Avoid lingering reads, as the caller
      * will likely call ring_io_init() just after this.  */
     rio->disable_reading = TRUE;
+    rio->disable_writing = FALSE;
     rio->batch_secs = 255;
+    enqueue_io(rio);
     while (rio->sync_needed) {
         rio->sync_requested = TRUE;
         ASSERT(rio->fop_cb != NULL);
