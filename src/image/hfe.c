@@ -620,6 +620,9 @@ static bool_t hfe_write_track(struct image *im)
             }
         }
 
+        barrier();
+        wr->cons = c * 8;
+
         /* Stay aligned to track side. */
         if (rd->cons / 256 != (rd->cons + i) / 256)
             rd->cons += 256;
@@ -630,8 +633,6 @@ static bool_t hfe_write_track(struct image *im)
         ring_io_flush(&im->hfe.ring_io);
     else
         ring_io_progress(&im->hfe.ring_io);
-
-    wr->cons = c * 8;
 
     return flush;
 }

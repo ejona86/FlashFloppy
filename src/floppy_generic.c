@@ -1049,6 +1049,16 @@ static void IRQ_wdata_dma(void)
         uint16_t new_prod = ARRAY_SIZE(dma_wr->buf) - dma_wdata.cndtr;
         printk("Danger! WR drained=%d new=%d cyc/drained=%d\n", num_drained, (new_prod - prod)&buf_mask, (cyccnt_end - cyccnt_start)/num_drained);
     }
+    {
+        static int exceeded_count = 0;
+        if (bc_prod/8 > image->bufs.write_bc.cons/8 + image->bufs.write_bc.len) {
+            exceeded_count++;
+        }
+        if (write != NULL && exceeded_count) {
+            printk("write_bc buffer overrun! Exceeded by %d bytes %d times\n", bc_prod/8 - image->bufs.write_bc.cons/8 - image->bufs.write_bc.len, exceeded_count);
+            exceeded_count = 0;
+        }
+    }
 }
 
 void floppy_sync(void)
