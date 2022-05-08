@@ -307,7 +307,7 @@ static void timer_dma_init(void)
     } else {
         tim_rdata_flux->ccmr1 = (TIM_CCMR1_CC1S(TIM_CCS_OUTPUT) |
                             TIM_CCMR1_OC1M(TIM_OCM_PWM2));
-        tim_rdata_flux->ccer = TIM_CCER_CC1E | ((O_TRUE==0) ? TIM_CCER_CC1P : 0);
+        tim_rdata_flux->ccer = TIM_CCER_CC1E | ((O_TRUE==1) ? TIM_CCER_CC1P : 0);
         tim_rdata_flux->arr = sysclk_ns(100)-1;
         tim_rdata_flux->ccr1 = 1;
     }
