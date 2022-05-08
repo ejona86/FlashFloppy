@@ -9,10 +9,10 @@
  * See the file COPYING for more details, or visit <http://unlicense.org>.
  */
 
-/* TIM4: IRQ 30. */
-void IRQ_30(void) __attribute__((alias("IRQ_timer")));
-#define TIMER_IRQ 30
-#define tim tim4
+/* TIM6: IRQ 54. */
+void IRQ_54(void) __attribute__((alias("IRQ_timer")));
+#define TIMER_IRQ 54
+#define tim tim6
 
 /* IRQ only on counter overflow, one-time enable. */
 #define TIM_CR1 (TIM_CR1_URS | TIM_CR1_OPM)

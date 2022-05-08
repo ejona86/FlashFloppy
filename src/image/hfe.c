@@ -113,6 +113,8 @@ static bool_t hfe_open(struct image *im)
     im->write_bc_ticks = sysclk_us(500) / bitrate;
     im->ticks_per_cell = im->write_bc_ticks * 16;
     im->sync = SYNC_none;
+    printk("read_data.len: %d\n", im->bufs.read_data.len);
+    printk("ticks_per_cell: %d\n", im->ticks_per_cell / 16);
 
     /* Get an initial value for ticks per revolution. */
     hfe_seek_track(im, 0, FALSE);
@@ -155,6 +157,7 @@ static void hfe_seek_track(struct image *im, uint16_t track, bool_t async)
      * than some USB drives will serve up a single block.*/
     im->hfe.ring_io.batch_secs =
         (im->write_bc_ticks > sysclk_ns(1500)) ? 4 : 8;
+    im->hfe.ring_io.batch_secs = 128;
     im->hfe.ring_io.trailing_secs = MAX_BC_SECS;
 }
 
@@ -270,7 +273,7 @@ static bool_t hfe_read_track(struct image *im)
 
     while (nr_sec--) {
         uint32_t cons = rd->cons + (im->cur_track&1)*256;
-        memcpy(&bc_b[bc_p & bc_mask],
+        memcpy_fast(&bc_b[bc_p & bc_mask],
                &buf[ring_io_idx(&im->hfe.ring_io, cons)],
                256);
         rd->cons += 512;
@@ -283,18 +286,86 @@ static bool_t hfe_read_track(struct image *im)
     return TRUE;
 }
 
+static const uint16_t explode2le[] = {
+    0x0003, /* 00 */
+    0x0000, /* 01 */
+    0x0001, /* 10 */
+    0x0001, /* 11 corruption */
+};
+
+static const uint16_t explode2[] = {
+    0x0003, /* 00 */
+    0x0001, /* 01 */
+    0x0000, /* 10 */
+    0x0000, /* 11 corruption */
+};
+
+#define htobe2_16(x) ((((uint32_t)x) >> 16) | (((uint32_t)x) << 16))
+
+static const uint32_t explode4[] = {
+    htobe2_16(0x00030003), /* 0000 */
+    htobe2_16(0x00030001), /* 0001 */
+    htobe2_16(0x00030000), /* 0010 */
+    htobe2_16(0x00030000), /* 0011 corruption */
+    htobe2_16(0x00010003), /* 0100 */
+    htobe2_16(0x00010001), /* 0101 */
+    htobe2_16(0x00010000), /* 0110 */
+    htobe2_16(0x00010000), /* 0111 corruption */
+    htobe2_16(0x00000003), /* 1000 */
+    htobe2_16(0x00000001), /* 1001 */
+    htobe2_16(0x00000000), /* 1010 */
+    htobe2_16(0x00000000), /* 1011 corruption */
+    htobe2_16(0x00000003), /* 1100 corruption */
+    htobe2_16(0x00000001), /* 1101 corruption */
+    htobe2_16(0x00000000), /* 1110 corruption */
+    htobe2_16(0x00000000), /* 1111 corruption */
+};
+
+static always_inline void explode32_unaligned(uint16_t *tbuf, uint32_t x, uint32_t ticks_per_cell) {
+    uint32_t *tbuf32;
+    switch (((uintptr_t)tbuf)&2) {
+        case 0:
+            *((uint32_t*)tbuf) = explode4[x >> 28] * ticks_per_cell + 0x10001;
+            tbuf += 2;
+            x <<= 4;
+            break;
+        case 2:
+            *(tbuf+15) = explode2[x&3] * ticks_per_cell + 1;
+            *(tbuf++) = explode2[x>>30] * ticks_per_cell + 1;
+            x <<= 2;
+            break;
+    }
+    tbuf32 = (void*) tbuf;
+    if (FALSE) {
+    #pragma GCC unroll 7
+    for (int i = 0; i < 28; i += 4) {
+        *(tbuf32++) = explode4[x >> 28] * ticks_per_cell + 0x10001;
+        x <<= 4;
+    }
+    } else {
+    #pragma GCC unroll 7
+    for (int i = 0; i < 28; i += 4) {
+        uint32_t bits = x >> 28;
+        uint32_t bytes;
+        asm ("ldr %0,[%1,%2,lsl #2]" : "=r" (bytes) : "r" (explode4), "r" (bits));
+        *(tbuf32++) = bytes * ticks_per_cell + 0x10001;
+        x <<= 4;
+    }
+    }
+}
+
 static uint16_t hfe_rdata_flux(struct image *im, uint16_t *tbuf, uint16_t nr)
 {
     struct image_buf *bc = &im->bufs.read_bc;
     uint8_t *bc_b = bc->p;
     uint32_t bc_c = bc->cons, bc_p = bc->prod, bc_mask = bc->len - 1;
-    uint32_t ticks = im->ticks_since_flux;
     uint32_t ticks_per_cell = im->ticks_per_cell;
     uint32_t y = 8, todo = nr;
     uint8_t x;
     bool_t is_v3 = im->hfe.is_v3;
+    uint32_t numread;
 
-    while ((int32_t)(bc_p - bc_c) >= 3*8) {
+    while ((int32_t)(bc_p - bc_c) >= 4*8) {
         ASSERT(y == 8);
         if (im->cur_bc >= im->tracklen_bc) {
             ASSERT(im->cur_bc == im->tracklen_bc);
@@ -310,6 +381,29 @@ static uint16_t hfe_rdata_flux(struct image *im, uint16_t *tbuf, uint16_t nr)
             im->hfe.next_index_pulses_pos = 0;
             continue;
         }
+        numread = min_t(uint32_t,
+                min_t(uint32_t, bc_p - bc_c, im->tracklen_bc - im->cur_bc)/32,
+                todo/16);
+        if (numread && bc_c % 32 == 0) {
+            uint16_t *stbuf = tbuf;
+            uint32_t bc_stop, sbc_c = bc_c;
+            int i;
+            bc_stop = bc_c + numread*32;
+            do {
+                uint32_t x = le32toh(((uint32_t*) bc_b)[((bc_c/8) & bc_mask) / 4]);
+                explode32_unaligned(tbuf, _rbit32(x), ticks_per_cell/16);
+                tbuf += 16;
+                bc_c += 32;
+            } while (bc_c != bc_stop);
+            i = bc_c - sbc_c;
+            im->cur_bc += i;
+            im->cur_ticks += ticks_per_cell * i;
+            todo -= tbuf-stbuf;
+            if (!todo)
+                goto out;
+            continue;
+        }
+
         y = bc_c % 8;
         x = bc_b[(bc_c/8) & bc_mask] >> y;
         if (is_v3 && (y == 0) && ((x & 0xf) == 0xf)) {
@@ -357,16 +451,13 @@ static uint16_t hfe_rdata_flux(struct image *im, uint16_t *tbuf, uint16_t nr)
         bc_c += 8 - y;
         im->cur_bc += 8 - y;
         im->cur_ticks += (8 - y) * ticks_per_cell;
+        y += y&1; // FIXME
         while (y < 8) {
-            y++;
-            ticks += ticks_per_cell;
-            if (x & 1) {
-                *tbuf++ = (ticks >> 4) - 1;
-                ticks &= 15;
-                if (!--todo)
-                    goto out;
-            }
-            x >>= 1;
+            y += 2;
+            *(tbuf++) = explode2le[x&3] * (ticks_per_cell/16) + 1;
+            if (!--todo)
+                goto out;
+            x >>= 2;
         }
     }
 
@@ -374,7 +465,6 @@ out:
     bc->cons = bc_c - (8 - y);
     im->cur_bc -= 8 - y;
     im->cur_ticks -= (8 - y) * ticks_per_cell;
-    im->ticks_since_flux = ticks;
     return nr - todo;
 }
 
@@ -424,6 +514,7 @@ static bool_t hfe_write_track(struct image *im)
         /* It should be quite rare to wait on the read, as that'd be like a
          * buffer underrun during normal reading. */
         if (rd->cons + nr > rd->prod) {
+            printk("Waiting on read\n");
             flush = FALSE;
             break;
         }

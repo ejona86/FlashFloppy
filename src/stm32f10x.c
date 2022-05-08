@@ -186,7 +186,8 @@ static void peripheral_init(void)
     /* Enable basic GPIO and AFIO clocks, all timers, and DMA. */
     rcc->apb1enr = (RCC_APB1ENR_TIM2EN |
                     RCC_APB1ENR_TIM3EN |
-                    RCC_APB1ENR_TIM4EN);
+                    RCC_APB1ENR_TIM4EN |
+                    RCC_APB1ENR_TIM6EN);
     rcc->apb2enr = (RCC_APB2ENR_IOPAEN |
                     RCC_APB2ENR_IOPBEN |
                     RCC_APB2ENR_IOPCEN |

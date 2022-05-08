@@ -295,23 +295,33 @@ static void timer_dma_init(void)
      * O_FALSE until the counter reloads. By changing the ARR via DMA we alter
      * the time between (fixed-width) O_TRUE pulses, mimicking floppy drive 
      * timings. */
-    tim_rdata->psc = 0;
+    /* ITR3=TIM4 for TIM3 */
+    tim_rdata_flux->smcr = TIM_SMCR_TS_ITR3 | TIM_SMCR_SMS_TRIGGER;
+    tim_rdata_flux->psc = 0;
     if (!st506) {
-        tim_rdata->ccmr1 = (TIM_CCMR1_CC2S(TIM_CCS_OUTPUT) |
+        tim_rdata_flux->ccmr1 = (TIM_CCMR1_CC2S(TIM_CCS_OUTPUT) |
                             TIM_CCMR1_OC2M(TIM_OCM_PWM1));
-        tim_rdata->ccer = TIM_CCER_CC2E | ((O_TRUE==0) ? TIM_CCER_CC2P : 0);
-        tim_rdata->ccr2 = sysclk_ns(400);
+        tim_rdata_flux->ccer = TIM_CCER_CC2E | ((O_TRUE==0) ? TIM_CCER_CC2P : 0);
+        tim_rdata_flux->arr = sysclk_ns(400)-1;
+        tim_rdata_flux->ccr2 = 1;
     } else {
-        tim_rdata->ccmr1 = (TIM_CCMR1_CC1S(TIM_CCS_OUTPUT) |
-                            TIM_CCMR1_OC1M(TIM_OCM_PWM1));
-        tim_rdata->ccer = TIM_CCER_CC1E | ((O_TRUE==0) ? TIM_CCER_CC1P : 0);
-        tim_rdata->ccr1 = sysclk_ns(120);
+        tim_rdata_flux->ccmr1 = (TIM_CCMR1_CC1S(TIM_CCS_OUTPUT) |
+                            TIM_CCMR1_OC1M(TIM_OCM_PWM2));
+        tim_rdata_flux->ccer = TIM_CCER_CC1E | ((O_TRUE==0) ? TIM_CCER_CC1P : 0);
+        tim_rdata_flux->arr = sysclk_ns(100)-1;
+        tim_rdata_flux->ccr1 = 1;
     }
-    tim_rdata->dier = TIM_DIER_UDE;
-    tim_rdata->cr2 = 0;
+    tim_rdata_flux->cr1 = TIM_CR1_OPM;
 
-    /* DMA setup: From a circular buffer into the RDATA Timer's ARR. */
-    dma_rdata.cpar = (uint32_t)(unsigned long)&tim_rdata->arr;
+    tim_rdata->cr2 = TIM_CR2_MMS_OC1REF | TIM_CR2_CCDS;
+    tim_rdata->dier = TIM_DIER_CC1DE;
+    tim_rdata->ccmr1 = TIM_CCMR1_CC1S(TIM_CCS_OUTPUT) |
+                       TIM_CCMR1_OC1M(TIM_OCM_PWM2) |
+                       TIM_CCMR1_OC1PE;
+    tim_rdata->psc = 0;
+
+    /* DMA setup: From a circular buffer into the RDATA Timer's CCR1. */
+    dma_rdata.cpar = (uint32_t)(unsigned long)&tim_rdata->ccr1;
     dma_rdata.cmar = (uint32_t)(unsigned long)dma_rd->buf;
     dma_rdata.cndtr = ARRAY_SIZE(dma_rd->buf);
     dma_rdata.ccr = (DMA_CCR_PL_HIGH |
@@ -336,8 +346,7 @@ static void timer_dma_init(void)
     tim_wdata->ccmr1 = TIM_CCMR1_CC1S(TIM_CCS_INPUT_TI1);
     tim_wdata->dier = TIM_DIER_CC1DE;
     tim_wdata->cr2 = 0;
-    tim_wdata->smcr &= TIM_SMCR_RES;
-    tim_wdata->smcr |= TIM_SMCR_TS_TI1FP1 | TIM_SMCR_SMS_RESET;
+    tim_wdata->smcr = TIM_SMCR_TS_TI1FP1 | TIM_SMCR_SMS_RESET;
 
     /* DMA setup: From the WDATA Timer's CCRx into a circular buffer. */
     dma_wdata.cpar = (uint32_t)(unsigned long)&tim_wdata->ccr1;
@@ -510,10 +519,11 @@ static void rdata_start(void)
     dma_rd->state = DMA_active;
 
     /* Start timer. */
-    tim_rdata->arr = 1; /* prime timer with short dummy duration. The following pulse will be from DMA. FIXME: use EGR twice? */
-    tim_rdata->egr = TIM_EGR_UG;
+    tim_rdata->arr = (drive.image->ticks_per_cell/(16/2)) - 1;
+    tim_rdata->ccr1 = 0xFFFF;
+    tim_rdata->egr = TIM_EGR_UG; /* Load fake sample from preload register. Trigger first DMA */
     tim_rdata->sr = 0; /* dummy write, gives h/w time to process EGR.UG=1 */
-    tim_rdata->cr1 = TIM_CR1_CEN | TIM_CR1_ARPE;
+    tim_rdata->cr1 = TIM_CR1_CEN;
 
     /* Enable output. */
     if (drive.sel)
@@ -651,7 +661,9 @@ static void IRQ_rdata_dma(void)
     if (done != nr) {
         /* Read buffer ran dry: kick us when more data is available. */
         dma_rd->kick_dma_irq = TRUE;
-    } else if (nr != nr_to_cons) {
+        printk("kick_dma_irq\n");
+    } else if (nr_to_cons - nr >= ARRAY_SIZE(dma_rd->buf)/2) {
+        /* Substantial amount left unprocessed. */
         /* We didn't fill the ring: re-enter this ISR to do more work. */
         IRQx_set_pending(dma_rdata_irq);
     }
@@ -680,20 +692,27 @@ static void IRQ_rdata_dma(void)
     }
 #endif
 
+    if ((dma1->isr & DMA_ISR_GIF(dma_rdata_ch)) && done > 800) {
+        uint32_t new_cons = ARRAY_SIZE(dma_rd->buf) - dma_rdata.cndtr;
+        uint32_t new = (new_cons - dmacons)&buf_mask;
+        if (new > done/2)
+            printk("Danger! RD drained=%d new=%d\n", done, new);
+    }
+
     /* Check if we have crossed the index mark. If not, we're done. */
     if (image_ticks_since_index(drv->image) >= prev_ticks_since_index)
         return;
 
     /* We crossed the index mark: Synchronise index pulse to the bitstream. */
     for (;;) {
-        dma_rd->cons = ARRAY_SIZE(dma_rd->buf) - dma_rdata.cndtr;
         /* Snapshot current position in flux stream, including progress through
          * current timer sample. */
         now = time_now();
         /* Ticks left in current sample. */
         ticks = tim_rdata->arr - tim_rdata->cnt;
         /* Index of next sample. */
-        dmacons = ARRAY_SIZE(dma_rd->buf) - dma_rdata.cndtr;
+        i = ARRAY_SIZE(dma_rd->buf) - dma_rdata.cndtr;
+        dma_rd->cons = i;
         break; // FIXME
         /* If another sample was loaded meanwhile, try again for a consistent
          * snapshot. */
@@ -701,9 +720,7 @@ static void IRQ_rdata_dma(void)
             break;
         dma_rd->cons = dmacons;
     }
-    /* Sum all flux timings in the DMA buffer. */
-    for (i = dmacons; i != dma_rd->prod; i = (i+1) & buf_mask)
-        ticks += dma_rd->buf[i] + 1;
+    ticks += ((dma_rd->prod - i)&buf_mask) * (tim_rdata->arr+1);
     /* Subtract current flux offset beyond the index. */
     ticks -= image_ticks_since_index(drv->image);
     /* Calculate deadline for index timer. */

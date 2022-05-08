@@ -435,9 +435,8 @@ static void floppy_sync_flux(void)
 
             /* Sum all flux timings in the DMA buffer. */
             const uint16_t buf_mask = ARRAY_SIZE(dma_rd->buf) - 1;
-            uint32_t i, ticks = 0;
-            for (i = dma_rd->cons; i != dma_rd->prod; i = (i+1) & buf_mask)
-                ticks += dma_rd->buf[i] + 1;
+            uint32_t ticks = 0;
+            ticks += ((dma_rd->prod - dma_rd->cons)&buf_mask) * (tim_rdata->arr+1);
 
             /* Subtract current flux offset beyond the index. */
             ticks -= image_ticks_since_index(drv->image);
