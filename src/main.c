@@ -298,7 +298,7 @@ static void led_7seg_update_track(bool_t force)
 
     floppy_get_track(&ti);
     changed = (ti.cyl != led_ti.cyl) || ((ti.side != led_ti.side) && ti.sel)
-        || (ti.writing != led_ti.writing);
+        /*|| (ti.writing != led_ti.writing)*/;
 
     if (force) {
         /* First call afer mounting new image: forcibly show track nr. */
@@ -320,7 +320,7 @@ static void led_7seg_update_track(bool_t force)
         led_ti = ti;
     } else if (active_countdown != 0) {
         /* Count down towards reverting to showing image nr. */
-        active_countdown--;
+        //active_countdown--; /* ST506 hack: redraw consumes too much CPU */
     }
 
     if ((display_state != LED_TRACK) || (active_countdown == 0)) {
@@ -336,7 +336,7 @@ static void led_7seg_update_track(bool_t force)
     if (!showing_track || changed) {
         const static char status[] = { 'k', 'm', 'v', 'w' };
         snprintf(msg, sizeof(msg), "%2u%c", ti.cyl,
-                 status[ti.side|(ti.writing<<1)]);
+                 status[ti.side/*|(ti.writing<<1)*/]);
         led_7seg_write_string(msg);
         showing_track = TRUE;
     }
