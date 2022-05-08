@@ -711,6 +711,196 @@ static void IRQ_rdata_dma(void)
     timer_set(&index.timer, now + ticks);
 }
 
+static int32_t flux8_to_rll_mul(uint32_t cons, uint16_t cell, uint32_t *_nr, uint32_t bc_dat, uint32_t frac, uint32_t shift) {
+    uint32_t nr = 0;
+    uint16_t add = (cell>>1) + 2;
+    if (FALSE) {
+#pragma GCC unroll 8
+    for (int i = 0; i < 8; i++, cons = cons+1) {
+        int shifts;
+        uint16_t curr = dma_wr->buf[cons];
+
+        shifts = ((curr + add) * frac) >> shift;
+        bc_dat <<= shifts;
+        bc_dat |= 1;
+        nr += shifts;
+    }
+    } else {
+    uint16_t *buf = &dma_wr->buf[cons];
+    uint16_t curr0;
+    uint16_t curr1;
+    uint16_t curr2;
+    uint16_t curr3;
+    asm(
+        "ldrh %[nr], [%[buf]]\n"
+        "ldrh %[curr0], [%[buf], #2]\n"
+        "ldrh %[curr1], [%[buf], #4]\n"
+        "ldrh %[curr2], [%[buf], #6]\n"
+
+        "adds %[nr], %[add]\n"
+        "muls %[nr], %[frac]\n"
+        "asrs %[nr], %[shift]\n"
+        "lsls %[bc_dat], %[nr]\n"
+        "adds %[bc_dat], #1\n"
+
+        "adds %[curr0], %[add]\n"
+        "muls %[curr0], %[frac]\n"
+        "asrs %[curr0], %[shift]\n"
+        "lsls %[bc_dat], %[curr0]\n"
+        "adds %[bc_dat], #1\n"
+        "adds %[nr], %[curr0]\n"
+
+        "adds %[curr0], %[curr1], %[add]\n"
+        "muls %[curr0], %[frac]\n"
+        "asrs %[curr0], %[shift]\n"
+        "lsls %[bc_dat], %[curr0]\n"
+        "adds %[bc_dat], #1\n"
+        "adds %[nr], %[curr0]\n"
+
+        "adds %[curr0], %[curr2], %[add]\n"
+        "muls %[curr0], %[frac]\n"
+        "asrs %[curr0], %[shift]\n"
+        "lsls %[bc_dat], %[curr0]\n"
+        "adds %[bc_dat], #1\n"
+        "adds %[nr], %[curr0]\n"
+
+
+        "ldrh %[curr0], [%[buf], #8]\n"
+        "ldrh %[curr1], [%[buf], #10]\n"
+        "ldrh %[curr2], [%[buf], #12]\n"
+        "ldrh %[curr3], [%[buf], #14]\n"
+
+        "adds %[curr0], %[add]\n"
+        "muls %[curr0], %[frac]\n"
+        "asrs %[curr0], %[shift]\n"
+        "lsls %[bc_dat], %[curr0]\n"
+        "adds %[bc_dat], #1\n"
+        "adds %[nr], %[curr0]\n"
+
+        "adds %[curr0], %[curr1], %[add]\n"
+        "muls %[curr0], %[frac]\n"
+        "asrs %[curr0], %[shift]\n"
+        "lsls %[bc_dat], %[curr0]\n"
+        "adds %[bc_dat], #1\n"
+        "adds %[nr], %[curr0]\n"
+
+        "adds %[curr0], %[curr2], %[add]\n"
+        "muls %[curr0], %[frac]\n"
+        "asrs %[curr0], %[shift]\n"
+        "lsls %[bc_dat], %[curr0]\n"
+        "adds %[bc_dat], #1\n"
+        "adds %[nr], %[curr0]\n"
+
+        "adds %[curr0], %[curr3], %[add]\n"
+        "muls %[curr0], %[frac]\n"
+        "asrs %[curr0], %[shift]\n"
+        "lsls %[bc_dat], %[curr0]\n"
+        "adds %[bc_dat], #1\n"
+        "adds %[nr], %[curr0]\n"
+        : [bc_dat] "+l"(bc_dat), [nr] "=&l"(nr), [curr0] "=&l"(curr0), [curr1] "=&h"(curr1), [curr2] "=&h"(curr2), [curr3] "=&h"(curr3)
+        : [add] "r"(add), [buf] "r"(buf), [frac] "l"(frac), [shift] "r"(shift)
+        : "cc");
+    }
+
+    *_nr = nr;
+    return bc_dat;
+}
+
+static int32_t flux8_to_rll_cell8(uint32_t cons, uint32_t *_nr, uint32_t bc_dat) {
+    const uint16_t cell = 8;
+    uint32_t nr = 0;
+    uint16_t add = (cell>>1) + 2 + 3; /* +3 is hack */
+    if (FALSE) {
+#pragma GCC unroll 8
+    for (int i = 0; i < 8; i++, cons = cons+1) {
+        int shifts;
+        uint16_t curr = dma_wr->buf[cons];
+
+        shifts = (curr + add) / cell;
+        //shifts = (curr + (cell>>1)) / cell;
+        bc_dat <<= shifts;
+        bc_dat |= 1;
+        nr += shifts;
+    }
+    } else {
+    uint16_t *buf = &dma_wr->buf[cons];
+    uint16_t curr0;
+    uint16_t curr1;
+    uint16_t curr2;
+    uint16_t curr3;
+    asm(
+        "ldrh %[nr], [%[buf]]\n"
+        "ldrh %[curr0], [%[buf], #2]\n"
+        "ldrh %[curr1], [%[buf], #4]\n"
+        "ldrh %[curr2], [%[buf], #6]\n"
+        "ldrh %[curr3], [%[buf], #8]\n"
+
+        "adds %[nr], %[add]\n"
+        "asrs %[nr], #3\n"
+        "lsls %[bc_dat], %[nr]\n"
+        "adds %[bc_dat], #1\n"
+
+        "adds %[curr0], %[add]\n"
+        "asrs %[curr0], #3\n"
+        "lsls %[bc_dat], %[curr0]\n"
+        "adds %[bc_dat], #1\n"
+        "adds %[nr], %[curr0]\n"
+
+        "adds %[curr0], %[curr1], %[add]\n"
+        "asrs %[curr0], #3\n"
+        "lsls %[bc_dat], %[curr0]\n"
+        "adds %[bc_dat], #1\n"
+        "adds %[nr], %[curr0]\n"
+
+        "adds %[curr0], %[curr2], %[add]\n"
+        "asrs %[curr0], #3\n"
+        "lsls %[bc_dat], %[curr0]\n"
+        "adds %[bc_dat], #1\n"
+        "adds %[nr], %[curr0]\n"
+
+        "adds %[curr0], %[curr3], %[add]\n"
+        "asrs %[curr0], #3\n"
+        "lsls %[bc_dat], %[curr0]\n"
+        "adds %[bc_dat], #1\n"
+        "adds %[nr], %[curr0]\n"
+
+
+        "ldrh %[curr0], [%[buf], #10]\n"
+        "ldrh %[curr1], [%[buf], #12]\n"
+        "ldrh %[curr2], [%[buf], #14]\n"
+
+        "adds %[curr0], %[add]\n"
+        "asrs %[curr0], #3\n"
+        "lsls %[bc_dat], %[curr0]\n"
+        "adds %[bc_dat], #1\n"
+        "adds %[nr], %[curr0]\n"
+
+        "adds %[curr0], %[curr1], %[add]\n"
+        "asrs %[curr0], #3\n"
+        "lsls %[bc_dat], %[curr0]\n"
+        "adds %[bc_dat], #1\n"
+        "adds %[nr], %[curr0]\n"
+
+        "adds %[curr0], %[curr2], %[add]\n"
+        "asrs %[curr0], #3\n"
+        "lsls %[bc_dat], %[curr0]\n"
+        "adds %[bc_dat], #1\n"
+        "adds %[nr], %[curr0]\n"
+        : [bc_dat] "+l"(bc_dat), [nr] "=&l"(nr), [curr0] "=&l"(curr0), [curr1] "=&h"(curr1), [curr2] "=&h"(curr2), [curr3] "=&h"(curr3)
+        : [add] "M"(add), [buf] "r"(buf)
+        : "cc");
+    }
+
+    *_nr = nr;
+    return bc_dat;
+}
+
+static inline uint32_t _clz(uint32_t x) {
+    uint32_t result;
+    asm ("clz %0,%1" : "=r" (result) : "r" (x));
+    return result;
+}
+
 static void IRQ_wdata_dma(void)
 {
     const uint16_t buf_mask = ARRAY_SIZE(dma_wr->buf) - 1;
@@ -721,6 +911,9 @@ static void IRQ_wdata_dma(void)
     unsigned int sync = image->sync;
     unsigned int bc_bufmask = (image->bufs.write_bc.len / 4) - 1;
     struct write *write = NULL;
+    uint16_t num_drained;
+    const bool_t hack7is8 = TRUE;
+    uint32_t cyccnt_start, cyccnt_end;
 
     window = cell + (cell >> 1);
 
@@ -739,12 +932,50 @@ static void IRQ_wdata_dma(void)
     if (image->wr_bc != image->wr_prod) {
         write = get_write(image, image->wr_bc);
         prod = write->dma_end;
-    }
+    } else if (((prod - dma_wr->cons) & buf_mask) > 31)
+        /* Keep alignment for flux8_to_rll, plus some to avoid stepping into
+         * the next half of buffer and incurring the loop overhead. */
+        prod &= ~31;
 
     /* Process the flux timings into the raw bitcell buffer. */
     bc_prod = image->bufs.write_bc.prod;
     bc_dat = image->write_bc_window;
+    num_drained = (prod - dma_wr->cons)&buf_mask;
+    cyccnt_start = dwt->cyccnt;
     for (cons = dma_wr->cons; cons != prod; cons = (cons+1) & buf_mask) {
+        if (sync == SYNC_none && (!hack7is8 || cell == 7) && ((prod - cons) & buf_mask) >= 8 && cons + 7 <= buf_mask) {
+            uint16_t todo = min_t(uint16_t, (prod - cons) & buf_mask, ARRAY_SIZE(dma_wr->buf) - cons);
+            uint16_t end = cons + (todo & ~7);
+            uint32_t bc_prod_hi = bc_prod / 32;
+            uint32_t bc_prod_lo = bc_prod % 32;
+            uint32_t shift = (31-_clz((uint32_t)cell))+16;
+            uint32_t frac = ((1<<shift)+(uint32_t)cell) / (uint32_t)cell;
+            do {
+                uint32_t nr = 0;
+                uint32_t tmp_dat;
+                if (!hack7is8) // 13-14 (C); 12-13 (full asm)
+                    tmp_dat = flux8_to_rll_mul(cons, cell, &nr, bc_dat, frac, shift);
+                else // 12-13 (C); 11 (full asm)
+                    tmp_dat = flux8_to_rll_cell8(cons, &nr, bc_dat);
+                /*if (unlikely(nr > 32)) {
+                    printk("Exceeded\n");
+                    goto slow;
+                }*/
+                cons += 8;
+                bc_prod_lo += nr;
+                if (bc_prod_lo >= 32) {
+                    bc_prod_lo -= 32;
+                    bc_dat <<= nr - bc_prod_lo;
+                    bc_dat |= tmp_dat >> bc_prod_lo;
+                    bc_buf[bc_prod_hi++ & bc_bufmask] = htobe32(bc_dat);
+                }
+                bc_dat = tmp_dat;
+            } while (cons != end);
+            bc_prod = bc_prod_hi * 32 + bc_prod_lo;
+            cons--;
+            continue;
+        }
+//slow:
         curr = dma_wr->buf[cons]+2;
         while (curr > window) {
             curr -= cell;
@@ -770,6 +1001,7 @@ static void IRQ_wdata_dma(void)
         if (!(bc_prod&31))
             bc_buf[((bc_prod-1) / 32) & bc_bufmask] = htobe32(bc_dat);
     }
+    cyccnt_end = dwt->cyccnt;
 
     if (bc_prod & 31)
         bc_buf[(bc_prod / 32) & bc_bufmask] = htobe32(bc_dat << (-bc_prod&31));
@@ -789,6 +1021,11 @@ static void IRQ_wdata_dma(void)
     image->write_bc_window = bc_dat;
     image->bufs.write_bc.prod = bc_prod;
     dma_wr->cons = cons;
+
+    if (dma1->isr & DMA_ISR_GIF(dma_wdata_ch)) {
+        uint16_t new_prod = ARRAY_SIZE(dma_wr->buf) - dma_wdata.cndtr;
+        printk("Danger! WR drained=%d new=%d cyc/drained=%d\n", num_drained, (new_prod - prod)&buf_mask, (cyccnt_end - cyccnt_start)/num_drained);
+    }
 }
 
 void floppy_sync(void)
