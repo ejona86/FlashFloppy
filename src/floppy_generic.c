@@ -295,8 +295,6 @@ static void timer_dma_init(void)
      * O_FALSE until the counter reloads. By changing the ARR via DMA we alter
      * the time between (fixed-width) O_TRUE pulses, mimicking floppy drive 
      * timings. */
-    /* ITR3=TIM4 for TIM3 */
-    tim_rdata_flux->smcr = TIM_SMCR_TS_ITR3 | TIM_SMCR_SMS_TRIGGER;
     tim_rdata_flux->psc = 0;
     if (!st506) {
         tim_rdata_flux->ccmr1 = (TIM_CCMR1_CC2S(TIM_CCS_OUTPUT) |
@@ -311,17 +309,9 @@ static void timer_dma_init(void)
         tim_rdata_flux->arr = sysclk_ns(100)-1;
         tim_rdata_flux->ccr1 = 1;
     }
-    tim_rdata_flux->cr1 = TIM_CR1_OPM;
 
-    tim_rdata->cr2 = TIM_CR2_MMS_OC1REF | TIM_CR2_CCDS;
-    tim_rdata->dier = TIM_DIER_CC1DE;
-    tim_rdata->ccmr1 = TIM_CCMR1_CC1S(TIM_CCS_OUTPUT) |
-                       TIM_CCMR1_OC1M(TIM_OCM_PWM2) |
-                       TIM_CCMR1_OC1PE;
-    tim_rdata->psc = 0;
-
-    /* DMA setup: From a circular buffer into the RDATA Timer's CCR1. */
-    dma_rdata.cpar = (uint32_t)(unsigned long)&tim_rdata->ccr1;
+    /* DMA setup: From a circular buffer into the RDATA Timer's CCR2. */
+    dma_rdata.cpar = (uint32_t)(unsigned long)&tim_rdata->ccr2;
     dma_rdata.cmar = (uint32_t)(unsigned long)dma_rd->buf;
     dma_rdata.cndtr = ARRAY_SIZE(dma_rd->buf);
     dma_rdata.ccr = (DMA_CCR_PL_HIGH |
@@ -341,12 +331,6 @@ static void timer_dma_init(void)
      * no input prescaling or filtering. Samples are captured on the falling 
      * edge of the input (CCxP=1). DMA is used to copy the sample into a ring
      * buffer for batch processing in the DMA-completion ISR. */
-    tim_wdata->cr2 = 0;
-    tim_wdata->smcr = TIM_SMCR_TS_TI1FP1 | TIM_SMCR_SMS_RESET;
-    tim_wdata->dier = TIM_DIER_CC1DE;
-    tim_wdata->ccmr1 = TIM_CCMR1_CC1S(TIM_CCS_INPUT_TI1);
-    tim_wdata->psc = 0;
-    tim_wdata->arr = 0xffff;
 
     /* DMA setup: From the WDATA Timer's CCRx into a circular buffer. */
     dma_wdata.cpar = (uint32_t)(unsigned long)&tim_wdata->ccr1;
@@ -458,6 +442,13 @@ static void wdata_start(void)
     dma_wr->state = DMA_starting;
 
     /* Start timer. */
+    tim_wdata->cr2 = 0;
+    tim_wdata->smcr = TIM_SMCR_TS_TI1FP1 | TIM_SMCR_SMS_RESET;
+    tim_wdata->dier = TIM_DIER_CC1DE;
+    tim_wdata->ccmr1 = TIM_CCMR1_CC1S(TIM_CCS_INPUT_TI1);
+    tim_wdata->psc = 0;
+    tim_wdata->arr = 0xffff;
+
     tim_wdata->egr = TIM_EGR_UG;
     tim_wdata->sr = 0; /* dummy write, gives h/w time to process EGR.UG=1 */
     tim_wdata->ccer = TIM_CCER_CC1E | TIM_CCER_CC1P;
@@ -499,6 +490,8 @@ static void rdata_stop(void)
 
     /* Turn off timer. */
     tim_rdata->cr1 = 0;
+    tim_rdata_flux->cr1 = 0;
+    tim_rdata_flux->smcr = 0;
 
     /* track-change = instant: Restart read stream where we left off. */
     if ((ff_cfg.track_change == TRKCHG_instant)
@@ -519,8 +512,18 @@ static void rdata_start(void)
     dma_rd->state = DMA_active;
 
     /* Start timer. */
+    /* ITR0=TIM1 for TIM3 */
+    tim_rdata_flux->smcr = TIM_SMCR_TS_ITR0 | TIM_SMCR_SMS_TRIGGER;
+    tim_rdata_flux->cr1 = TIM_CR1_OPM;
+    tim_rdata->cr2 = TIM_CR2_MMS_OC2REF | TIM_CR2_CCDS;
+    tim_rdata->smcr = 0;
+    tim_rdata->dier = TIM_DIER_CC2DE;
+    tim_rdata->ccmr1 = TIM_CCMR1_CC2S(TIM_CCS_OUTPUT) |
+                       TIM_CCMR1_OC2M(TIM_OCM_PWM2) |
+                       TIM_CCMR1_OC2PE;
+
     tim_rdata->arr = (drive.image->ticks_per_cell/(16/2)) - 1;
-    tim_rdata->ccr1 = 0xFFFF;
+    tim_rdata->ccr2 = 0xFFFF;
     tim_rdata->egr = TIM_EGR_UG; /* Load fake sample from preload register. Trigger first DMA */
     tim_rdata->sr = 0; /* dummy write, gives h/w time to process EGR.UG=1 */
     tim_rdata->cr1 = TIM_CR1_CEN;

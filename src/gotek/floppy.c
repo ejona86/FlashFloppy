@@ -42,11 +42,11 @@ void IRQ_12(void) __attribute__((alias("IRQ_wdata_dma")));
 #define gpio_rdata  gpioc
 #define pin_rdata   6
 #define tim_rdata_flux   (tim3)
-#define tim_rdata   (tim4)
-#define dma_rdata   (dma1->ch[1-1])
-#define dma_rdata_ch 1
-#define dma_rdata_irq 11
-void IRQ_11(void) __attribute__((alias("IRQ_rdata_dma")));
+#define tim_rdata   (tim1)
+#define dma_rdata   (dma1->ch[3-1])
+#define dma_rdata_ch 3
+#define dma_rdata_irq 13
+void IRQ_13(void) __attribute__((alias("IRQ_rdata_dma")));
 
 #define pin_drv_sel 7
 
