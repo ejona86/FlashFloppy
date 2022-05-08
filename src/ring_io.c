@@ -213,7 +213,7 @@ static void enqueue_io(struct ring_io *rio)
     uint32_t cons;
     bool_t has_shadow = rio->f_shadow_off != ~0;
 
-    if (rio->fop_cb != NULL)
+    if (rio->writing && rio->ring_len != rio->f_len && rio->fop_cb != NULL)
         return;
 
     if (rio->sync_needed) {
@@ -227,7 +227,10 @@ static void enqueue_io(struct ring_io *rio)
                 break;
             rio->wd_cons += 512;
         }
+    }
 
+    /* ST506 hack: is it safe? */
+    if (rio->sync_needed && rio->ring_len != rio->f_len) {
         cons = rd->cons & ~511;
         cons = min_t(uint32_t, rio->wd_cons, cons);
     } else {
@@ -245,6 +248,9 @@ static void enqueue_io(struct ring_io *rio)
         /* Fully buffered, so no need to BIT_SET unread_bitfield. */
         rio->rd_valid = cons;
     else {
+        if (rio->fop_cb != NULL)
+            return;
+
         /* Invalidate read data to open up space for new reads. Do it in
          * batches to optimize I/O throughput. */
         if (rio->rd_valid + rio->batch_secs * 512 <= cons
@@ -268,6 +274,9 @@ static void enqueue_io(struct ring_io *rio)
             break;
         rd->prod += 512;
     }
+
+    if (rio->fop_cb != NULL)
+        return;
 
     if (!rio->disable_reading && rio->rd_valid + rio->ring_len > rd->prod) {
         read_start(rio);
