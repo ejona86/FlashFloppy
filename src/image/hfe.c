@@ -557,8 +557,30 @@ static bool_t hfe_write_track(struct image *im)
         im->hfe.fresh_seek = FALSE;
 
         if (!is_v3) {
-            for (; i < nr; i++)
-                *w++ = _rbit32(buf[c++ & bufmask]) >> 24;
+            while (i < nr) {
+                uint32_t towrap = wr->len - (c&bufmask);
+                uint32_t fast_stop = min_t(uint32_t, towrap, nr);
+                uint32_t fake_align = ((c&3) - (((uint32_t)w)&3))&3;
+                uint32_t cmasked = c & bufmask;
+                c ^= cmasked;
+                w += fake_align;
+                i += fake_align;
+                for (; (c&3) && i < fast_stop; i++)
+                    *w++ = _rbit32(buf[cmasked++]) >> 24;
+                for (; i+16 <= fast_stop; i+=16, cmasked+=16) {
+                    *(uint32_t*)w = _rev32(_rbit32(*(uint32_t*)&buf[cmasked + 0]));
+                    w += 4;
+                    *(uint32_t*)w = _rev32(_rbit32(*(uint32_t*)&buf[cmasked + 4]));
+                    w += 4;
+                    *(uint32_t*)w = _rev32(_rbit32(*(uint32_t*)&buf[cmasked + 8]));
+                    w += 4;
+                    *(uint32_t*)w = _rev32(_rbit32(*(uint32_t*)&buf[cmasked + 12]));
+                    w += 4;
+                }
+                for (; i < fast_stop; i++)
+                    *w++ = _rbit32(buf[cmasked++]) >> 24;
+                c += cmasked;
+            }
         } else {
             for (; i < nr; i++) {
                 if ((*w & 0xf) == 0xf) {
