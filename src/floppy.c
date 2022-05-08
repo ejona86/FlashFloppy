@@ -476,8 +476,8 @@ static bool_t dma_rd_handle(struct drive *drv)
         time_t index_time, read_start_pos;
         unsigned int track;
         time_t start_time = time_now();
-        /* Allow 10ms from current rotational position to load new track */
-        int32_t delay = time_ms(10);
+        /* Allow 2ms from current rotational position to load new track */
+        int32_t delay = time_ms(2);
         /* Allow extra time if heads are settling. */
         if (drv->step.state & STEP_settling) {
             time_t step_settle = drv->step.start
