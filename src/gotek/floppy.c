@@ -47,6 +47,8 @@ void IRQ_12(void) __attribute__((alias("IRQ_wdata_dma")));
 #define dma_rdata_irq 13
 void IRQ_13(void) __attribute__((alias("IRQ_rdata_dma")));
 
+#define pin_drv_sel 7
+
 /* EXTI IRQs. */
 void IRQ_6(void) __attribute__((alias("IRQ_SELA_changed"))); /* EXTI0 */
 void IRQ_7(void) __attribute__((alias("IRQ_WGATE_changed"))); /* EXTI1 */
@@ -183,6 +185,7 @@ static void _IRQ_SELA_changed(uint32_t _gpio_out_active)
          * Immediately re-enable all our asserted outputs. */
         gpiob->brr = _gpio_out_active & 0xffff;
         gpioa->brr = _gpio_out_active >> 16;
+        gpio_data->brr = 1 << pin_drv_sel; /* FIXME; clean up */
         /* Set pin_rdata as timer output (AFO_bus). */
         if (dma_rd && (dma_rd->state == DMA_active))
             gpio_rdata->crl = (gpio_rdata->crl & ~(0xfu<<(pin_rdata<<2)))
@@ -194,6 +197,7 @@ static void _IRQ_SELA_changed(uint32_t _gpio_out_active)
          * Relinquish the bus by disabling all our asserted outputs. */
         gpiob->bsrr = _gpio_out_active & 0xffff;
         gpioa->bsrr = _gpio_out_active >> 16;
+        gpio_data->bsrr = 1 << pin_drv_sel;
         /* Set pin_rdata as quiescent (GPO_bus). */
         if (dma_rd && (dma_rd->state == DMA_active))
             gpio_rdata->crl = (gpio_rdata->crl & ~(0xfu<<(pin_rdata<<2)))
