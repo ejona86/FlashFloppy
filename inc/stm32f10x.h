@@ -78,7 +78,7 @@ void system_reset(void) __attribute__((noreturn));
 extern bool_t is_artery_mcu;
 
 /* Clocks */
-#define SYSCLK_MHZ 72
+#define SYSCLK_MHZ 80
 #define SYSCLK     (SYSCLK_MHZ * 1000000)
 #define sysclk_ns(x) (((x) * SYSCLK_MHZ) / 1000)
 #define sysclk_us(x) ((x) * SYSCLK_MHZ)

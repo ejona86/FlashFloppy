@@ -151,7 +151,7 @@ static void clock_init(void)
         cpu_relax();
 
     /* PLLs, scalers, muxes. */
-    rcc->cfgr = (RCC_CFGR_PLLMUL(9) |        /* PLL = 9*8MHz = 72MHz */
+    rcc->cfgr = (RCC_CFGR_PLLMUL(10) |        /* PLL = 9*8MHz = 72MHz */
                  RCC_CFGR_PLLSRC_PREDIV1 |
                  RCC_CFGR_ADCPRE_DIV8 |
                  RCC_CFGR_PPRE1_DIV2);

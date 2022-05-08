@@ -832,7 +832,7 @@ static int32_t flux8_to_rll_mul(uint32_t cons, uint16_t cell, uint32_t *_nr, uin
 static int32_t flux8_to_rll_cell8(uint32_t cons, uint32_t *_nr, uint32_t bc_dat) {
     const uint16_t cell = 8;
     uint32_t nr = 0;
-    uint16_t add = (cell>>1) + 2 + 3; /* +3 is hack */
+    uint16_t add = (cell>>1) + 2;
     if (FALSE) {
 #pragma GCC unroll 8
     for (int i = 0; i < 8; i++, cons = cons+1) {
@@ -935,7 +935,7 @@ static void IRQ_wdata_dma(void)
     unsigned int bc_bufmask = (image->bufs.write_bc.len / 4) - 1;
     struct write *write = NULL;
     uint16_t num_drained;
-    const bool_t hack7is8 = TRUE;
+    const bool_t specialCase8 = TRUE;
     uint32_t cyccnt_start, cyccnt_end;
 
     window = cell + (cell >> 1);
@@ -966,7 +966,7 @@ static void IRQ_wdata_dma(void)
     num_drained = (prod - dma_wr->cons)&buf_mask;
     cyccnt_start = dwt->cyccnt;
     for (cons = dma_wr->cons; cons != prod; cons = (cons+1) & buf_mask) {
-        if (sync == SYNC_none && (!hack7is8 || cell == 7) && ((prod - cons) & buf_mask) >= 8 && cons + 7 <= buf_mask) {
+        if (sync == SYNC_none && (!specialCase8 || cell == 8) && ((prod - cons) & buf_mask) >= 8 && cons + 7 <= buf_mask) {
             uint16_t todo = min_t(uint16_t, (prod - cons) & buf_mask, ARRAY_SIZE(dma_wr->buf) - cons);
             uint16_t end = cons + (todo & ~7);
             uint32_t bc_prod_hi = bc_prod / 32;
@@ -976,7 +976,7 @@ static void IRQ_wdata_dma(void)
             do {
                 uint32_t nr = 0;
                 uint32_t tmp_dat;
-                if (!hack7is8) // 13-14 (C); 12-13 (full asm)
+                if (!specialCase8) // 13-14 (C); 12-13 (full asm)
                     tmp_dat = flux8_to_rll_mul(cons, cell, &nr, bc_dat, frac, shift);
                 else // 12-13 (C); 11 (full asm)
                     tmp_dat = flux8_to_rll_cell8(cons, &nr, bc_dat);
