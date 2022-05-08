@@ -700,7 +700,7 @@ static void IRQ_rdata_dma(void)
 
 static void IRQ_wdata_dma(void)
 {
-    const uint16_t buf_mask = ARRAY_SIZE(dma_rd->buf) - 1;
+    const uint16_t buf_mask = ARRAY_SIZE(dma_wr->buf) - 1;
     uint16_t cons, prod, prev, curr, next;
     uint16_t cell = image->write_bc_ticks, window;
     uint32_t bc_dat = 0, bc_prod;
