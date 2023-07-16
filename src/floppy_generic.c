@@ -569,10 +569,6 @@ static bool_t dma_wr_handle(struct drive *drv)
         /* Align the bitcell consumer index for start of next write. */
         im->bufs.write_bc.cons = (write->bc_end + 31) & ~31;
 
-        /* Sync back to mass storage. */
-        if (!im->track_handler->async)
-            F_sync(&im->fp);
-
         IRQ_global_disable();
         /* Consume the write from the pipeline buffer. */
         im->wr_cons++;

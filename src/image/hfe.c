@@ -472,8 +472,6 @@ const struct image_handler hfe_image_handler = {
     .rdata_flux = hfe_rdata_flux,
     .write_track = hfe_write_track,
     .sync = hfe_sync,
-
-    .async = TRUE,
 };
 
 /*
