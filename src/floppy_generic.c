@@ -154,7 +154,6 @@ static void floppy_mount(struct slot *slot)
     FSIZE_t fastseek_sz;
     DWORD *cltbl;
     FRESULT fr;
-    int max_ring_kb = (ram_kb >= 128) ? 64 : (ram_kb >= 64) ? 32 : 8;
 
     do {
 
@@ -193,8 +192,9 @@ static void floppy_mount(struct slot *slot)
         /* ~0 avoids sync match within fewer than 32 bits of scan start. */
         im->write_bc_window = ~0;
 
-        /* Large buffer to absorb write latencies at mass-storage layer. */
-        im->bufs.write_bc.len = max_ring_kb*1024; /* power of two */
+        /* Size at least 4kb so a 512 byte sector (1k bc) can be fully
+         * encoded into the 2kb read_bc, with space to spare. */
+        im->bufs.write_bc.len = 4*1024; /* Power of two. */
         im->bufs.write_bc.p = arena_alloc(im->bufs.write_bc.len);
 
         /* Read BC buffer overlaps the second half of the write BC buffer. This 
