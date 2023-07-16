@@ -40,6 +40,12 @@
 
 #define verbose_image_log FALSE
 
+struct image_buf {
+    void *p;
+    uint32_t len;
+    uint32_t prod, cons;
+};
+
 struct adf_image {
     struct file_cache *fcache;
     uint32_t trk_off;
@@ -135,12 +141,13 @@ struct directaccess {
     uint16_t trk_sec;
     uint16_t idx_sz, idam_sz, dam_sz;
     bool_t lba_set;
-};
-
-struct image_buf {
-    void *p;
-    uint32_t len;
-    uint32_t prod, cons;
+    uint16_t trash_bc; /* Number of bitcells to throw away. */
+    uint8_t *rd_buf;
+    FOP io_op;
+    struct image_buf write_buffer;
+    LBA_t *write_offsets; /* Disk offset of each 512 byte buffer segment */
+    uint8_t write_cnt;
+    uint8_t sync_state;
 };
 
 struct image_bufs {
