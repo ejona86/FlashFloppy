@@ -2144,6 +2144,8 @@ static int run_floppy(void *_b)
         t_prev = t_now;
     }
 
+    floppy_sync();
+
     if (display_type == DT_LED_7SEG)
         display_state = LED_NORMAL;
 
