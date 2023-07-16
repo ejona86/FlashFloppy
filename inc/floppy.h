@@ -51,19 +51,11 @@ struct adf_image {
 };
 
 struct hfe_image {
+    struct file_cache *fcache;
     uint16_t tlut_base;
     uint16_t trk_off;
     uint16_t trk_pos, trk_len;
-    bool_t is_v3, double_step;
-    uint8_t batch_secs;
-    struct {
-        uint16_t start;
-        bool_t wrapped;
-    } write;
-    struct {
-        uint16_t off, len;
-        bool_t dirty;
-    } write_batch;
+    bool_t is_v3, double_step, fresh_seek;
 };
 
 struct qd_image {

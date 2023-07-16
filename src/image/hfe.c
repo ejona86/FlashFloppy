@@ -69,7 +69,7 @@ enum {
     OP_Rand     = 0x2f  /* Random byte (or bits, if following OP_skip) */
 };
 
-static void hfe_seek_track(struct image *im, uint16_t track);
+static void hfe_seek_track(struct image *im, uint16_t track, bool_t async);
 
 static bool_t hfe_open(struct image *im)
 {
@@ -106,24 +106,33 @@ static bool_t hfe_open(struct image *im)
     im->ticks_per_cell = im->write_bc_ticks * 16;
     im->sync = SYNC_none;
 
-    ASSERT(8*512 <= im->bufs.read_data.len);
-    volume_cache_init(im->bufs.read_data.p + 8*512,
-                      im->bufs.read_data.p + im->bufs.read_data.len);
-    if (im->bufs.read_data.len < (64*1024))
-        volume_cache_metadata_only(&im->fp);
+    /* Aggressively batch our reads at HD data rate, as that can be faster
+     * than some USB drives will serve up a single block.*/
+    im->hfe.fcache = file_cache_init(&im->fp,
+            (im->write_bc_ticks > sampleclk_ns(1500)) ? 4 : 8,
+            im->bufs.read_data.p,
+            im->bufs.read_data.p + im->bufs.read_data.len);
 
     /* Get an initial value for ticks per revolution. */
-    hfe_seek_track(im, 0);
+    hfe_seek_track(im, 0, FALSE);
+    im->cur_track = -1;
 
     return TRUE;
 }
 
-static void hfe_seek_track(struct image *im, uint16_t track)
+static void hfe_seek_track(struct image *im, uint16_t track, bool_t async)
 {
     struct track_header thdr;
 
-    F_lseek(&im->fp, im->hfe.tlut_base*512 + (track/2)*4);
-    F_read(&im->fp, &thdr, sizeof(thdr), NULL);
+    if (async) {
+        file_cache_io_limit(im->hfe.fcache, 1);
+        file_cache_read(im->hfe.fcache,
+                &thdr, im->hfe.tlut_base*512 + (track/2)*4, sizeof(thdr));
+        file_cache_io_limit(im->hfe.fcache, 0 /* no limit */);
+    } else {
+        F_lseek(&im->fp, im->hfe.tlut_base*512 + (track/2)*4);
+        F_read(&im->fp, &thdr, sizeof(thdr), NULL);
+    }
 
     im->hfe.trk_off = le16toh(thdr.offset);
     im->hfe.trk_len = le16toh(thdr.len) / 2;
@@ -136,21 +145,35 @@ static void hfe_seek_track(struct image *im, uint16_t track)
         im->stk_per_rev = stk_sampleclk(im->tracklen_ticks / 16);
     }
 
-    im->cur_track = track;
+    file_cache_readahead(im->hfe.fcache,
+            (LBA_t)im->hfe.trk_off * 512, im->hfe.trk_len*2, 12*1024);
 }
 
 static void hfe_setup_track(
     struct image *im, uint16_t track, uint32_t *start_pos)
 {
-    struct image_buf *rd = &im->bufs.read_data;
     struct image_buf *bc = &im->bufs.read_bc;
     uint32_t start_ticks;
     uint8_t cyl = track >> (im->hfe.double_step ? 2 : 1);
     uint8_t side = track & (im->nr_sides - 1);
 
     track = cyl*2 + side;
-    if (track != im->cur_track)
-        hfe_seek_track(im, track);
+    if (track/2 != im->cur_track/2) {
+        file_cache_sync_wait(im->hfe.fcache);
+
+        im->cur_track = track;
+        hfe_seek_track(im, track, TRUE);
+    } else if (track != im->cur_track) {
+        im->cur_track = track;
+    }
+
+    /* If track does not fit in memory, now is a good time to flush writes to
+     * reduce chances of future buffer underrun caused by a very slow write.
+     * However if write-drain=realtime, then any delays cut into reads so we
+     * just accept the buffer underrun risk. */
+    if ((im->hfe.trk_len*2 + 511) / 512 > im->bufs.read_data.len
+            && ff_cfg.write_drain != WDRAIN_realtime)
+        file_cache_sync_wait(im->hfe.fcache);
 
     start_ticks = start_pos ? *start_pos : get_write(im, im->wr_cons)->start;
 
@@ -164,18 +187,14 @@ static void hfe_setup_track(
     }
     im->ticks_since_flux = 0;
 
-    rd->prod = rd->cons = 0;
     bc->prod = bc->cons = 0;
-
-    /* Aggressively batch our reads at HD data rate, as that can be faster 
-     * than some USB drives will serve up a single block.*/
-    im->hfe.batch_secs = (im->write_bc_ticks > sampleclk_ns(1500)) ? 2 : 8;
 
     if (start_pos) {
         /* Read mode. */
         im->hfe.trk_pos = (im->cur_bc/8) & ~255;
-        image_read_track(im);
-        bc->cons = im->cur_bc & 2047;
+        /* Consumer may be ahead of producer, but only until the first read
+         * completes. */
+        bc->cons = im->cur_bc % (256*8);
     } else {
         /* Write mode. */
         im->hfe.trk_pos = im->cur_bc / 8;
@@ -186,50 +205,39 @@ static void hfe_setup_track(
             else if ((im->hfe.trk_pos & 255) == 1)
                 im->hfe.trk_pos = (im->hfe.trk_pos+1) % im->hfe.trk_len;
         }
-        im->hfe.write.start = im->hfe.trk_pos;
-        im->hfe.write.wrapped = FALSE;
-        im->hfe.write_batch.len = 0;
-        im->hfe.write_batch.dirty = FALSE;
+        im->hfe.fresh_seek = TRUE;
     }
 }
 
 static bool_t hfe_read_track(struct image *im)
 {
-    struct image_buf *rd = &im->bufs.read_data;
     struct image_buf *bc = &im->bufs.read_bc;
-    uint8_t *buf = rd->p;
     uint8_t *bc_b = bc->p;
     uint32_t bc_len, bc_mask, bc_space, bc_p, bc_c;
     unsigned int nr_sec;
-
-    if (rd->prod == rd->cons) {
-        nr_sec = min_t(unsigned int, im->hfe.batch_secs,
-                       (im->hfe.trk_len+255 - im->hfe.trk_pos) / 256);
-        F_lseek(&im->fp, im->hfe.trk_off * 512 + im->hfe.trk_pos * 2);
-        F_read(&im->fp, buf, nr_sec*512, NULL);
-        rd->cons = 0;
-        rd->prod = nr_sec;
-        im->hfe.trk_pos += nr_sec * 256;
-        if (im->hfe.trk_pos >= im->hfe.trk_len)
-            im->hfe.trk_pos = 0;
-    }
 
     /* Fill the raw-bitcell ring buffer. */
     bc_p = bc->prod / 8;
     bc_c = bc->cons / 8;
     bc_len = bc->len;
     bc_mask = bc_len - 1;
-    bc_space = bc_len - (uint16_t)(bc_p - bc_c);
+    bc_space = bc_len - (int16_t)(bc_p - bc_c);
 
-    nr_sec = min_t(unsigned int, rd->prod - rd->cons, bc_space/256);
-    if (nr_sec == 0)
+    nr_sec = bc_space/256;
+    if (nr_sec == 0) {
+        file_cache_progress(im->hfe.fcache);
         return FALSE;
+    }
 
     while (nr_sec--) {
-        memcpy(&bc_b[bc_p & bc_mask],
-               &buf[rd->cons*512 + (im->cur_track&1)*256],
-               256);
-        rd->cons++;
+        FSIZE_t off = im->hfe.trk_off * 512
+            + im->hfe.trk_pos * 2
+            + (im->cur_track&1)*256;
+        if (!file_cache_try_read(im->hfe.fcache, &bc_b[bc_p & bc_mask], off, 256))
+            break;
+        im->hfe.trk_pos += 256;
+        if (im->hfe.trk_pos >= im->hfe.trk_len)
+            im->hfe.trk_pos = 0;
         bc_p += 256;
     }
 
@@ -333,18 +341,15 @@ out:
 
 static bool_t hfe_write_track(struct image *im)
 {
-    const unsigned int batch_secs = 8;
     bool_t flush;
     struct write *write = get_write(im, im->wr_cons);
     struct image_buf *wr = &im->bufs.write_bc;
     uint8_t *buf = wr->p;
     uint8_t b;
     unsigned int bufmask = wr->len - 1;
-    uint8_t *w, *wrbuf = im->bufs.write_data.p;
+    uint8_t *w, *wrbuf;
     uint32_t i, space, c = wr->cons / 8, p = wr->prod / 8;
     bool_t is_v3 = im->hfe.is_v3;
-    bool_t writeback = FALSE;
-    time_t t;
 
     /* If we are processing final data then use the end index, rounded to
      * nearest. */
@@ -353,20 +358,9 @@ static bool_t hfe_write_track(struct image *im)
     if (flush)
         p = (write->bc_end + 4) / 8;
 
-    if (im->hfe.write_batch.len == 0) {
-        ASSERT(!im->hfe.write_batch.dirty);
-        im->hfe.write_batch.off = (im->hfe.trk_pos & ~255) << 1;
-        im->hfe.write_batch.len = min_t(
-            uint32_t, batch_secs * 512,
-            (((im->hfe.trk_len * 2) + 511) & ~511) - im->hfe.write_batch.off);
-        F_lseek(&im->fp, im->hfe.trk_off * 512 + im->hfe.write_batch.off);
-        F_read(&im->fp, wrbuf, im->hfe.write_batch.len, NULL);
-        F_lseek(&im->fp, im->hfe.trk_off * 512 + im->hfe.write_batch.off);
-    }
-
     for (;;) {
 
-        uint32_t batch_off, off = im->hfe.trk_pos;
+        uint32_t foff, off = im->hfe.trk_pos;
         UINT nr;
 
         /* All bytes remaining in the raw-bitcell buffer. */
@@ -380,24 +374,18 @@ static bool_t hfe_write_track(struct image *im)
         if (nr == 0)
             break;
 
-        /* Bail if required data not in the write buffer. */
-        batch_off = (off & ~255) << 1; 
-        if ((batch_off < im->hfe.write_batch.off)
-            || (batch_off >= (im->hfe.write_batch.off
-                              + im->hfe.write_batch.len))) {
-            writeback = TRUE;
+        foff = im->hfe.trk_off * 512 + ((off & ~255) << 1);
+        if ((wrbuf = file_cache_peek_write(im->hfe.fcache, foff)) == NULL) {
+            flush = FALSE;
             break;
         }
-
-        /* Encode into the sector buffer for later write-out. */
         w = wrbuf
             + (im->cur_track & 1) * 256
-            + batch_off - im->hfe.write_batch.off
             + (off & 255);
 
         i = 0;
 
-        if (is_v3 && off == im->hfe.write.start && off != 0) {
+        if (im->hfe.fresh_seek && is_v3 && off != 0) {
             /* Avoid starting write in the middle of an opcode. */
             if (w[-2] == OP_SkipBits) {
                 i++;
@@ -414,6 +402,7 @@ static bool_t hfe_write_track(struct image *im)
                 }
             }
         }
+        im->hfe.fresh_seek = FALSE;
 
         while (i < nr) {
             if (is_v3 && (w[i] & 0xf) == 0xf) {
@@ -452,43 +441,28 @@ static bool_t hfe_write_track(struct image *im)
                 b ^= 2;
             w[i++] = b;
         }
-        im->hfe.write_batch.dirty = TRUE;
 
         im->hfe.trk_pos += i; /* i may be larger than nr due to opcodes. */
         if (im->hfe.trk_pos >= im->hfe.trk_len) {
             ASSERT(im->hfe.trk_pos == im->hfe.trk_len);
             im->hfe.trk_pos = 0;
-            im->hfe.write.wrapped = TRUE;
         }
     }
 
-    if (writeback) {
-        /* If writeback requested then ensure we get called again. */
-        flush = FALSE;
-    } else if (flush) {
-        /* If this is the final call, we should do writeback. */
-        writeback = TRUE;
-    }
-
-    if (writeback && im->hfe.write_batch.dirty) {
-        t = time_now();
-        printk("Write %u-%u (%u)... ",
-               im->hfe.write_batch.off,
-               im->hfe.write_batch.off + im->hfe.write_batch.len - 1,
-               im->hfe.write_batch.len);
-        F_write(&im->fp, wrbuf, im->hfe.write_batch.len, NULL);
-        printk("%u us\n", time_diff(t, time_now()) / TIME_MHZ);
-        im->hfe.write_batch.len = 0;
-        im->hfe.write_batch.dirty = FALSE;
-    }
-
-    if (flush && im->hfe.write.wrapped
-        && (im->hfe.trk_pos > im->hfe.write.start))
-        printk("Wrapped (%u > %u)\n", im->hfe.trk_pos, im->hfe.write.start);
+    if (flush)
+        file_cache_sync(im->hfe.fcache);
+    else
+        file_cache_progress(im->hfe.fcache);
 
     wr->cons = c * 8;
 
     return flush;
+}
+
+static void hfe_sync(struct image *im)
+{
+    file_cache_sync_wait(im->hfe.fcache);
+    file_cache_shutdown(im->hfe.fcache);
 }
 
 const struct image_handler hfe_image_handler = {
@@ -497,6 +471,9 @@ const struct image_handler hfe_image_handler = {
     .read_track = hfe_read_track,
     .rdata_flux = hfe_rdata_flux,
     .write_track = hfe_write_track,
+    .sync = hfe_sync,
+
+    .async = TRUE,
 };
 
 /*
