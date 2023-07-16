@@ -222,6 +222,8 @@ struct image_handler {
     bool_t (*read_track)(struct image *im);
     uint16_t (*rdata_flux)(struct image *im, uint16_t *tbuf, uint16_t nr);
     bool_t (*write_track)(struct image *im);
+
+    bool_t async;
 };
 
 /* List of supported image types. */
