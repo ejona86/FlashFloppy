@@ -72,6 +72,7 @@ static struct drive {
     } step;
     uint32_t restart_pos;
     struct image *image;
+    struct thread io_thread;
 } drive;
 
 static struct image *image;
@@ -132,6 +133,14 @@ static struct dma_ring *dma_ring_alloc(void)
     struct dma_ring *dma = arena_alloc(sizeof(*dma));
     memset(dma, 0, offsetof(struct dma_ring, buf));
     return dma;
+}
+
+static void io_thread_main(void *arg)
+{
+    while (1) {
+        F_async_drain();
+        thread_yield();
+    }
 }
 
 /* Allocate floppy resources and mount the given image. 
@@ -237,8 +246,18 @@ static void floppy_mount(struct slot *slot)
     dma_rd = _dma_rd;
     dma_wr = _dma_wr;
 
+    thread_start(&drv->io_thread, _thread1_stacktop, io_thread_main, NULL);
+
     drv->index_suppressed = FALSE;
     index.prev_time = time_now();
+}
+
+/* Release floppy resources. */
+static void floppy_cancel_generic(void)
+{
+    /* Clean up I/O. This must avoid potential cancel_call()s. */
+    F_async_cancel_all();
+    thread_reset();
 }
 
 /* Initialise timers and DMA for RDATA/WDATA. */

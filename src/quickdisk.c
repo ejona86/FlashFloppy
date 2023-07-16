@@ -93,6 +93,8 @@ void floppy_cancel(void)
     drv->index_suppressed = FALSE;
     drv->image = image = NULL;
     window.state = 0;
+
+    floppy_cancel_generic();
 }
 
 void floppy_set_fintf_mode(void)

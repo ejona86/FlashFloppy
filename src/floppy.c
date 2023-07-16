@@ -210,6 +210,8 @@ void floppy_cancel(void)
     barrier();
     drive_change_output(drv, outp_index, FALSE);
     drive_change_output(drv, outp_dskchg, TRUE);
+
+    floppy_cancel_generic();
 }
 
 void floppy_set_fintf_mode(void)
